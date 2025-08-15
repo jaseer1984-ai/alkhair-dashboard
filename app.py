@@ -1,13 +1,15 @@
-# app.py — Alkhair Family Market Daily Dashboard
+# app.py — Alkhair Family Market Daily Dashboard (Power BI–style cards)
 # - Hidden data source (hard-coded published CSV)
 # - Manual Refresh button (st.rerun) + auto-refresh every X minutes
-# - Robust numeric parsing for Sales/Qty/etc.
-# - Category chart as readable horizontal bars
-# - No cash/bank KPIs
+# - Robust numeric parsing + smart Qty mapping (aliases + fuzzy)
+# - Category chart (horizontal bars), KPIs, trend, stores, top items
+# - Date range shown as DD/MM/YYYY
+# - Card-based UI styling, soft shadows, icons
+# - Download current view
 
 import io, re
 from datetime import datetime
-from typing import List
+from typing import List, Optional, Dict
 
 import numpy as np
 import pandas as pd
@@ -15,72 +17,135 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import streamlit.components.v1 as components
 
-# ------------------------------------------------------------------------------------
+# =========================
 # CONFIG
-# ------------------------------------------------------------------------------------
+# =========================
 st.set_page_config(
     page_title="Alkhair Family Market — Daily Dashboard",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-# Your published CSV link:
+# Your published Google Sheets CSV:
 GSHEET_URL = (
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vSW_ui1m_393ipZv8NAliu1rly6zeifFxMfOWpQF17hjVIDa9Ll8PiGCaz8gTRkMQ/pub?output=csv"
 )
 
-# ======== Auto-refresh interval ========
-REFRESH_MINUTES = 1          # <-- change this (minutes)
+# Auto-refresh interval (minutes)
+REFRESH_MINUTES = 1
 REFRESH_SECONDS = REFRESH_MINUTES * 60
-# ======================================
 
-# Hide sidebar entirely
+# Hide sidebar completely & auto-refresh
 st.markdown("<style>[data-testid='stSidebar']{display:none!important}</style>", unsafe_allow_html=True)
-
-# Auto refresh page every REFRESH_SECONDS (very lightweight & reliable on Streamlit Cloud)
 components.html(f"<meta http-equiv='refresh' content='{REFRESH_SECONDS}'>", height=0)
 
-# ------------------------------------------------------------------------------------
+# =========================
+# THEME / CSS (Power BI–ish)
+# =========================
+css = """
+<style>
+:root{
+  --bg:#0b1220;           /* app background */
+  --card:#111a2b;         /* card background */
+  --ink:#eaf0ff;          /* text */
+  --ink-weak:#b9c2d6;
+  --accent:#4f8cff;       /* brand blue */
+  --accent-2:#19c37d;     /* green */
+  --accent-3:#f7b731;     /* amber */
+  --shadow:0 10px 24px rgba(0,0,0,.35);
+  --radius:18px;
+}
+html, body, [data-testid="stAppViewContainer"]{
+  background: var(--bg);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans";
+}
+h1,h2,h3{ color: var(--ink); }
+hr{ border-color:#1f2a44; }
+.card{
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px 18px 14px 18px;
+  border: 1px solid rgba(255,255,255,.06);
+}
+.card-header{
+  display:flex; align-items:center; gap:.6rem; margin-bottom:.5rem;
+  font-weight:700; color: var(--ink);
+}
+.badge{
+  font-size:.78rem; color: var(--ink-weak);
+}
+.kpi-grid{ display:grid; grid-template-columns: repeat(4, 1fr); gap:14px; }
+.kpi{
+  background: linear-gradient(180deg, rgba(79,140,255,.18), rgba(79,140,255,.05));
+  border:1px solid rgba(255,255,255,.08);
+  border-radius: 16px; padding: 16px; box-shadow: var(--shadow);
+}
+.kpi .label{ color: var(--ink-weak); font-size:.9rem; }
+.kpi .value{ font-size:1.6rem; font-weight:800; margin-top:.2rem; color: var(--ink); }
+.kpi .icon{ font-size:1.2rem; margin-right:.4rem; }
+.brandbar{
+  position:sticky; top:0; z-index:999; padding: 10px 0 8px 0; margin-bottom:12px;
+  background: linear-gradient(90deg, rgba(79,140,255,.18), rgba(25,195,125,.18));
+  border-bottom:1px solid rgba(255,255,255,.07);
+  backdrop-filter: blur(6px);
+}
+.btn-refresh button{
+  width:100%; border-radius:12px; border:1px solid rgba(255,255,255,.15);
+  background: linear-gradient(180deg,rgba(25,195,125,.25), rgba(25,195,125,.08));
+}
+.dataframe tbody tr{ background: transparent !important; }
+[data-testid="stMetricValue"]{ color: var(--ink); }
+[data-testid="stMetricDelta"]{ color: var(--accent-2); }
+.small{ font-size:.85rem; color:var(--ink-weak); }
+</style>
+"""
+st.markdown(css, unsafe_allow_html=True)
+
+# =========================
 # ALIASES & HELPERS
-# ------------------------------------------------------------------------------------
-DATE_ALIASES    = ["date", "bill_date", "txn_date"]
-STORE_ALIASES   = ["store", "branch", "location"]
-SALES_ALIASES   = ["sales", "amount", "net_sales", "revenue"]
-COGS_ALIASES    = ["cogs", "cost", "purchase_cost"]
-QTY_ALIASES     = ["qty", "quantity", "qty_sold", "quantity_sold", "units", "pieces", "pcs"]
-TICKETS_ALIASES = ["tickets", "bills", "invoice_count", "transactions"]
+# =========================
+DATE_ALIASES    = ["date", "bill_date", "txn_date", "invoice_date", "posting_date"]
+STORE_ALIASES   = ["store", "branch", "location", "shop"]
+SALES_ALIASES   = ["sales", "amount", "net_sales", "revenue", "netamount", "net_amount"]
+COGS_ALIASES    = ["cogs", "cost", "purchase_cost", "cost_of_goods"]
+QTY_ALIASES     = ["qty", "quantity", "qty_sold", "quantity_sold", "units", "pcs", "pieces", "units_sold", "qnty", "qnt", "qty."]
+TICKETS_ALIASES = ["tickets", "bills", "invoice_count", "transactions", "bills_count"]
 CAT_ALIASES     = ["category", "cat"]
-ITEM_ALIASES    = ["item", "product", "sku"]
+ITEM_ALIASES    = ["item", "product", "sku", "item_name"]
 INVQ_ALIASES    = ["inventoryqty", "inventory_qty", "stock_qty", "stockqty", "stock_quantity"]
 INVV_ALIASES    = ["inventoryvalue", "inventory_value", "stock_value", "stockvalue"]
 
 ROUND_DP = 2
 
-def _first_col(df: pd.DataFrame, aliases: List[str]):
-    low = {c.lower().strip(): c for c in df.columns}
+def _normalize_cols(cols: List[str]) -> Dict[str, str]:
+    return {c.lower().strip(): c for c in cols}
+
+def _first_exact_or_fuzzy(df: pd.DataFrame, aliases: List[str], fuzzy_tokens: Optional[List[str]]=None) -> Optional[str]:
+    low = _normalize_cols(list(df.columns))
     for a in aliases:
-        if a in low:
-            return low[a]
+        if a in low: return low[a]
+    tokens = (fuzzy_tokens or []) + aliases
+    for key_low, orig in low.items():
+        for t in tokens:
+            if t in key_low:
+                return orig
     return None
 
 def _gsheet_to_csv_url(url: str) -> str:
     if "docs.google.com/spreadsheets" not in url:
         return url
     if "/spreadsheets/d/e/" in url and "output=csv" in url:
-        return url  # already a published CSV
-    if "/export" in url and "format=csv" in url:
-        return url  # already an export CSV
-    m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", url)
-    if not m:
         return url
+    if "/export" in url and "format=csv" in url:
+        return url
+    m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", url)
+    if not m: return url
     sheet_id = m.group(1)
-    gid = "0"
-    m2 = re.search(r"gid=(\d+)", url)
-    if m2:
-        gid = m2.group(1)
+    gid = re.search(r"gid=(\d+)", url).group(1) if "gid=" in url else "0"
     return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
 
-# Robust numeric conversion: handles "1,234", " 45 ", "SAR 120.5", "(1,230)"
 _num_cleanup_re = re.compile(r"[^\d\-\.\,()]")
 def _to_num(x):
     if isinstance(x, (int, float, np.number)): return float(x)
@@ -90,253 +155,205 @@ def _to_num(x):
     s = _num_cleanup_re.sub("", s)
     neg = False
     if s.startswith("(") and s.endswith(")"):
-        neg = True
-        s = s[1:-1]
+        neg=True; s=s[1:-1]
     s = s.replace(",", "")
     try:
-        v = float(s)
-        return -v if neg else v
-    except Exception:
-        return np.nan
+        v=float(s); return -v if neg else v
+    except: return np.nan
 
 @st.cache_data(ttl=0, show_spinner=False)
 def load_data(url: str):
-    url2 = _gsheet_to_csv_url(url.strip())
-    return pd.read_csv(url2)
+    return pd.read_csv(_gsheet_to_csv_url(url.strip()))
 
-def standardize(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty: return df.copy()
-    df = df.rename(columns={c: c.strip().lower() for c in df.columns})
+def standardize(df: pd.DataFrame):
+    if df.empty: 
+        return df.copy(), {}
+    mapping = {}
+    df = df.copy()
 
-    def map_col(aliases, new, to_num=False, fill0=False):
-        c = _first_col(df, aliases)
-        if c is not None:
-            df.rename(columns={c: new}, inplace=True)
+    def map_col(aliases, new, to_num=False, fill0=False, fuzzy_extra=None):
+        col = _first_exact_or_fuzzy(df, aliases, fuzzy_extra)
+        if col:
+            mapping[new] = col
+            df.rename(columns={col:new}, inplace=True)
             if to_num:
                 df[new] = df[new].map(_to_num)
-                if fill0:
-                    df[new] = df[new].fillna(0)
+                if fill0: df[new] = df[new].fillna(0)
         else:
+            mapping[new] = "(missing)"
             df[new] = 0 if fill0 else np.nan
 
-    map_col(DATE_ALIASES, "Date")
+    # Date
+    cd = _first_exact_or_fuzzy(df, DATE_ALIASES, ["date"])
+    if cd:
+        mapping["Date"]=cd; df.rename(columns={cd:"Date"}, inplace=True)
+    else:
+        mapping["Date"]="(missing)"; df["Date"]=np.nan
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce", dayfirst=True)
 
-    map_col(STORE_ALIASES,   "Store")
-    map_col(SALES_ALIASES,   "Sales",          to_num=True, fill0=True)
-    map_col(COGS_ALIASES,    "COGS",           to_num=True)     # may be blank
-    map_col(QTY_ALIASES,     "Qty",            to_num=True, fill0=True)
-    map_col(TICKETS_ALIASES, "Tickets",        to_num=True)
-    map_col(CAT_ALIASES,     "Category")
-    map_col(ITEM_ALIASES,    "Item")
-    map_col(INVQ_ALIASES,    "InventoryQty",   to_num=True)
-    map_col(INVV_ALIASES,    "InventoryValue", to_num=True)
+    # Others
+    map_col(STORE_ALIASES, "Store")
+    map_col(SALES_ALIASES, "Sales", to_num=True, fill0=True)
+    map_col(COGS_ALIASES, "COGS", to_num=True)
+    map_col(QTY_ALIASES, "Qty", to_num=True, fill0=True, fuzzy_extra=["unit","piece","pcs","qty","qnty","quantity"])
+    map_col(TICKETS_ALIASES, "Tickets", to_num=True)
+    map_col(CAT_ALIASES, "Category")
+    map_col(ITEM_ALIASES, "Item")
+    map_col(INVQ_ALIASES, "InventoryQty", to_num=True)
+    map_col(INVV_ALIASES, "InventoryValue", to_num=True)
 
     df["GrossProfit"] = (df["Sales"] - df["COGS"]) if df["COGS"].notna().any() else np.nan
     df["Store"] = df["Store"].fillna("").astype(str).str.strip()
-    return df
+
+    if df["Qty"].fillna(0).sum()==0 and df["Tickets"].fillna(0).sum()>0:
+        df["Qty"] = df["Tickets"].fillna(0)
+        mapping["Qty"] += " (fallback from Tickets)"
+
+    return df, mapping
 
 def summarize(df: pd.DataFrame):
     if df.empty:
         return {}, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
     total_sales = float(np.nansum(df["Sales"]))
     total_gp    = float(np.nansum(df["GrossProfit"])) if df["GrossProfit"].notna().any() else np.nan
     tickets     = float(np.nansum(df["Tickets"])) if df["Tickets"].notna().any() else np.nan
     avg_basket  = (total_sales / tickets) if tickets and tickets > 0 else np.nan
     inv_value   = float(np.nansum(df["InventoryValue"])) if df["InventoryValue"].notna().any() else np.nan
-
-    kpis = {
-        "Sales":            round(total_sales, ROUND_DP),
-        "Gross Profit":     None if np.isnan(total_gp) else round(total_gp, ROUND_DP),
-        "Tickets":          None if np.isnan(tickets) else round(tickets, 0),
-        "Avg Basket":       None if np.isnan(avg_basket) else round(avg_basket, ROUND_DP),
-        "Inventory Value":  None if np.isnan(inv_value) else round(inv_value, ROUND_DP),
-    }
-
-    ts = df.dropna(subset=["Date"]).groupby("Date", as_index=False).agg({
-        "Sales": "sum", "GrossProfit": "sum", "Tickets": "sum"
-    })
-
-    by_store = df.groupby("Store", as_index=False).agg({
-        "Sales": "sum", "GrossProfit": "sum", "Tickets": "sum"
-    }).sort_values("Sales", ascending=False)
-
-    by_cat = (df.groupby("Category", as_index=False)
-                .agg({"Sales":"sum","GrossProfit":"sum","Qty":"sum"})
-                .sort_values("Sales", ascending=False)
-             ) if df["Category"].notna().any() else pd.DataFrame()
-
-    top_items = (df.groupby("Item", as_index=False)
-                   .agg({"Sales":"sum","GrossProfit":"sum","Qty":"sum"})
-                   .sort_values("Sales", ascending=False).head(20)
-                ) if df["Item"].notna().any() else pd.DataFrame()
-
+    kpis = {"Sales": round(total_sales,2),
+            "Gross Profit": None if np.isnan(total_gp) else round(total_gp,2),
+            "Tickets": None if np.isnan(tickets) else round(tickets,0),
+            "Avg Basket": None if np.isnan(avg_basket) else round(avg_basket,2),
+            "Inventory Value": None if np.isnan(inv_value) else round(inv_value,2)}
+    ts = df.dropna(subset=["Date"]).groupby("Date", as_index=False).agg({"Sales":"sum","GrossProfit":"sum","Tickets":"sum"})
+    by_store = df.groupby("Store", as_index=False).agg({"Sales":"sum","GrossProfit":"sum","Tickets":"sum"}).sort_values("Sales",ascending=False)
+    by_cat = (df.groupby("Category", as_index=False).agg({"Sales":"sum","GrossProfit":"sum","Qty":"sum"})
+              .sort_values("Sales",ascending=False)) if df["Category"].notna().any() else pd.DataFrame()
+    top_items = (df.groupby("Item", as_index=False).agg({"Sales":"sum","GrossProfit":"sum","Qty":"sum"})
+                 .sort_values("Sales",ascending=False).head(20)) if df["Item"].notna().any() else pd.DataFrame()
     return kpis, ts, by_store, by_cat, top_items
 
-def _pct(a, b):
-    if b in (0, None) or pd.isna(b): return None
-    return 100.0 * (a - b) / b
+def _pct(a,b):
+    if b in (0,None) or pd.isna(b): return None
+    return 100*(a-b)/b
 
 def quick_insights(df, ts, by_store, by_cat, kpis):
-    out = []
+    out=[]
     if not by_store.empty:
         out.append(f"🏆 Top store: **{by_store.iloc[0]['Store']}** — SAR {by_store.iloc[0]['Sales']:,.0f}")
-        if len(by_store) > 1:
+        if len(by_store)>1:
             out.append(f"📉 Lowest store: **{by_store.iloc[-1]['Store']}** — SAR {by_store.iloc[-1]['Sales']:,.0f}")
-    if not ts.empty and len(ts) >= 2:
-        ts2 = ts.sort_values("Date")
-        chg = _pct(float(ts2["Sales"].iloc[-1]), float(ts2["Sales"].iloc[-2]))
+    if not ts.empty and len(ts)>=2:
+        ts2=ts.sort_values("Date")
+        chg=_pct(float(ts2["Sales"].iloc[-1]), float(ts2["Sales"].iloc[-2]))
         if chg is not None:
-            arrow = "▲" if chg >= 0 else "▼"
-            out.append(f"{arrow} Day-over-day change: **{chg:+.1f}%**")
+            out.append(("▲" if chg>=0 else "▼")+f" DoD change: **{chg:+.1f}%**")
     if not by_cat.empty:
         out.append(f"🧺 Top category: **{by_cat.iloc[0]['Category']}** — SAR {by_cat.iloc[0]['Sales']:,.0f}")
-    gp, sales = kpis.get("Gross Profit"), kpis.get("Sales", 0)
-    if gp is not None and sales:
-        out.append(f"💰 Gross margin: **{(gp/sales)*100:,.1f}%** (GP SAR {gp:,.0f})")
+    gp,k=kpis.get("Gross Profit"), kpis.get("Sales",0)
+    if gp is not None and k:
+        out.append(f"💰 Gross margin: **{(gp/k)*100:,.1f}%** (GP SAR {gp:,.0f})")
     if df["Tickets"].notna().any():
-        t = float(np.nansum(df["Tickets"]))
-        if t:
-            out.append(f"🎟️ Avg basket: **SAR {float(np.nansum(df['Sales']))/t:,.2f}**")
+        t=float(np.nansum(df["Tickets"]))
+        if t: out.append(f"🎟️ Avg basket: **SAR {float(np.nansum(df['Sales']))/t:,.2f}**")
     return out
 
-# ------------------------------------------------------------------------------------
-# UI
-# ------------------------------------------------------------------------------------
-# Title + Refresh
-title_col, refresh_col = st.columns([1, 0.18])
-with title_col:
-    st.markdown("<h1 style='text-align:center;'>Alkhair Family Market — Daily Dashboard</h1>", unsafe_allow_html=True)
-with refresh_col:
-    if st.button("🔄 Refresh", use_container_width=True, help="Reload data now"):
-        st.cache_data.clear()
-        st.rerun()
+# =========================
+# HEADER BAR
+# =========================
+st.markdown("""
+<div class="brandbar card">
+  <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div style="font-weight:800;font-size:1.2rem;">🏪 Alkhair Family Market — Daily Dashboard</div>
+    <div class="small">Auto refresh: every """ + str(REFRESH_MINUTES) + """ min</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
-# Load data
+# Manual refresh button
+ref_col1, ref_col2 = st.columns([8,1.2])
+with ref_col2:
+    st.markdown('<div class="btn-refresh">', unsafe_allow_html=True)
+    if st.button("🔄 Refresh", use_container_width=True, help="Reload data now"):
+        st.cache_data.clear(); st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# =========================
+# LOAD & STANDARDIZE
+# =========================
 try:
     raw = load_data(GSHEET_URL)
 except Exception as e:
     st.error(f"Failed to load data: {e}")
     st.stop()
 
-st.caption(
-    f"Auto refresh: every {REFRESH_MINUTES} min • Last refreshed at "
-    f"{pd.Timestamp.now(tz='UTC').strftime('%Y-%m-%d %H:%M:%S')} UTC"
-)
+std, mapping = standardize(raw)
 
-std = standardize(raw)
+# Date range (display DD/MM/YYYY)
+if std["Date"].notna().any():
+    dmin = pd.to_datetime(std["Date"].min()).date()
+    dmax = pd.to_datetime(std["Date"].max()).date()
+    dr = st.date_input("Date range", value=(dmin, dmax))
+    if isinstance(dr, tuple) and len(dr)==2:
+        st.caption(f"Selected: {dr[0].strftime('%d/%m/%Y')} – {dr[1].strftime('%d/%m/%Y')} (UTC {datetime.utcnow().strftime('%H:%M:%S')})")
+else:
+    dr=None
+
+# Show mapping (debug)
+with st.expander("Data mapping (detected columns)"):
+    st.dataframe(pd.DataFrame({"Target": list(mapping.keys()), "Source column": list(mapping.values())}),
+                 use_container_width=True)
 
 # Filters
-if std["Date"].notna().any():
-    dmin, dmax = pd.to_datetime(std["Date"].min()), pd.to_datetime(std["Date"].max())
-    date_rng = st.date_input("Date range", (dmin.date(), dmax.date()))
-else:
-    date_rng = None
-
-stores = sorted([s for s in std["Store"].dropna().unique().tolist() if s])
+f = std.copy()
+if dr and isinstance(dr, tuple) and len(dr)==2 and f["Date"].notna().any():
+    d1 = pd.to_datetime(dr[0]); d2 = pd.to_datetime(dr[1]) + pd.Timedelta(days=1)
+    f = f[(f["Date"]>=d1) & (f["Date"]<d2)]
+stores = sorted([s for s in f["Store"].dropna().unique().tolist() if s])
 default_stores = [s for s in ["Magnus","Alkhair","Zelayi"] if s in stores] or stores
 store_sel = st.multiselect("Store(s)", stores, default=default_stores)
+if store_sel: f = f[f["Store"].isin(store_sel)]
 
-f = std.copy()
-if store_sel:
-    f = f[f["Store"].isin(store_sel)]
-if date_rng and isinstance(date_rng, tuple) and len(date_rng) == 2 and f["Date"].notna().any():
-    d1 = pd.to_datetime(date_rng[0]); d2 = pd.to_datetime(date_rng[1]) + pd.Timedelta(days=1)
-    f = f[(f["Date"] >= d1) & (f["Date"] < d2)]
-
-# Summaries
+# =========================
+# SUMMARIES
+# =========================
 kpis, ts, by_store, by_cat, top_items = summarize(f)
 
-# KPI cards
-c1, c2, c3, c4 = st.columns(4)
-with c1: st.metric("Sales (SAR)", f"{kpis.get('Sales', 0):,.2f}")
-with c2:
+# KPI CARDS
+st.markdown('<div class="kpi-grid">', unsafe_allow_html=True)
+k1,k2,k3,k4 = st.columns(4)
+with k1:
+    st.markdown('<div class="kpi">', unsafe_allow_html=True)
+    st.markdown('<div class="label"><span class="icon">💵</span>Sales (SAR)</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="value">{kpis.get("Sales",0):,.2f}</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+with k2:
+    st.markdown('<div class="kpi">', unsafe_allow_html=True)
+    st.markdown('<div class="label"><span class="icon">📈</span>Gross Profit (SAR)</div>', unsafe_allow_html=True)
     gp = kpis.get("Gross Profit")
-    st.metric("Gross Profit (SAR)", "-" if gp is None else f"{gp:,.2f}")
-with c3:
+    st.markdown(f'<div class="value">{"-" if gp is None else f"{gp:,.2f}"}</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+with k3:
+    st.markdown('<div class="kpi">', unsafe_allow_html=True)
+    st.markdown('<div class="label"><span class="icon">🎟️</span>Tickets</div>', unsafe_allow_html=True)
     t = kpis.get("Tickets")
-    st.metric("Tickets", "-" if t is None else f"{t:,.0f}")
-with c4:
+    st.markdown(f'<div class="value">{"-" if t is None else f"{t:,.0f}"}</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+with k4:
+    st.markdown('<div class="kpi">', unsafe_allow_html=True)
+    st.markdown('<div class="label"><span class="icon">🧺</span>Avg Basket (SAR)</div>', unsafe_allow_html=True)
     ab = kpis.get("Avg Basket")
-    st.metric("Avg Basket (SAR)", "-" if ab is None else f"{ab:,.2f}")
+    st.markdown(f'<div class="value">{"-" if ab is None else f"{ab:,.2f}"}</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
-st.divider()
+st.markdown("<br/>", unsafe_allow_html=True)
 
-# Charts
-left, right = st.columns([1.2, 1])
-with left:
-    st.subheader("📈 Sales Trend")
+# =========================
+# CHART CARDS
+# =========================
+c1, c2 = st.columns([1.2,1])
+with c1:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-header">📈 Sales Trend</div>', unsafe_allow_html=True)
     if not ts.empty:
-        st.line_chart(ts.set_index("Date")[["Sales"]])
-    else:
-        st.info("No dates available for trend.")
-with right:
-    st.subheader("🏬 Sales by Store")
-    if not by_store.empty:
-        st.bar_chart(by_store.set_index("Store")[["Sales"]])
-    else:
-        st.info("No store data.")
-
-col1, col2 = st.columns([1, 1])
-
-# Sales by Category — horizontal bars (clear)
-with col1:
-    st.subheader("🧺 Sales by Category")
-    if not by_cat.empty:
-        N = 8  # keep top N, group the rest into "Other"
-        dfc = by_cat.copy()
-        dfc["Sales"] = dfc["Sales"].astype(float)
-        dfc = dfc.sort_values("Sales", ascending=True)
-        if len(dfc) > N:
-            top = dfc.tail(N)
-            other = pd.DataFrame({"Category": ["Other"], "Sales": [dfc.iloc[:-N]["Sales"].sum()]})
-            dfc = pd.concat([top, other], ignore_index=True)
-
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.barh(dfc["Category"].astype(str), dfc["Sales"])
-        ax.set_xlabel("Sales (SAR)")
-        ax.set_ylabel("")
-        ax.ticklabel_format(style="plain", axis="x")
-        for i, v in enumerate(dfc["Sales"]):
-            ax.text(v, i, f" {v:,.0f}", va="center")
-        st.pyplot(fig)
-    else:
-        st.info("No category column found.")
-
-# Top Items
-with col2:
-    st.subheader("⭐ Top Items")
-    if not top_items.empty:
-        show = top_items.head(10).copy()
-        show["Sales"] = show["Sales"].map(lambda x: f"{x:,.0f}")
-        if show["GrossProfit"].notna().any():
-            show["GrossProfit"] = show["GrossProfit"].map(lambda x: f"{x:,.0f}")
-        show["Qty"] = show["Qty"].fillna(0).astype(float).astype(int)
-        st.dataframe(show, use_container_width=True)
-    else:
-        st.info("No item column found.")
-
-# Quick Insights
-st.subheader("✨ Quick Insights")
-ins = quick_insights(f, ts, by_store, by_cat, kpis)
-if ins:
-    st.markdown("\n".join([f"- {x}" for x in ins]))
-else:
-    st.info("No insights for current filters.")
-
-# Export current view
-buff = io.BytesIO()
-with pd.ExcelWriter(buff, engine="xlsxwriter") as wr:
-    f.to_excel(wr, sheet_name="Data", index=False)
-    if not ts.empty:        ts.to_excel(wr, sheet_name="TimeSeries", index=False)
-    if not by_store.empty:  by_store.to_excel(wr, sheet_name="ByStore", index=False)
-    if not by_cat.empty:    by_cat.to_excel(wr, sheet_name="ByCategory", index=False)
-    if not top_items.empty: top_items.to_excel(wr, sheet_name="TopItems", index=False)
-
-st.download_button(
-    "⬇️ Download Excel (current view)",
-    data=buff.getvalue(),
-    file_name=f"Alkhair_Dashboard_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-)
+        st.line_chart(ts.set_index("Date
