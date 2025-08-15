@@ -19,16 +19,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Your published Google Sheets CSV (Publish to the web -> CSV)
 GSHEET_URL = (
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vSW_ui1m_393ipZv8NAliu1rly6zeifFxMfOWpQF17hjVIDa9Ll8PiGCaz8gTRkMQ/pub?output=csv"
 )
 
-# Auto-refresh interval
 REFRESH_MINUTES = 1
 REFRESH_SECONDS = REFRESH_MINUTES * 60
 
-# Hide sidebar & auto refresh
 st.markdown("<style>[data-testid='stSidebar']{display:none!important}</style>", unsafe_allow_html=True)
 components.html(f"<meta http-equiv='refresh' content='{REFRESH_SECONDS}'>", height=0)
 
@@ -248,28 +245,36 @@ except Exception as e:
 std, mapping = standardize(raw)
 
 # =========================
-# DATE RANGE (safe) — FIX for ValueError from session state mismatch
+# DATE RANGE — robust against stale widget state
 # =========================
-if "daterange" in st.session_state and not isinstance(st.session_state["daterange"], tuple):
-    # Clear old single-date state so we can use a (start,end) tuple
-    del st.session_state["daterange"]
+def date_range_picker(dmin: date, dmax: date):
+    # If there's any incompatible previous state for this key, drop it
+    if "daterange" in st.session_state:
+        v = st.session_state["daterange"]
+        if not (isinstance(v, tuple) and len(v) == 2):
+            st.session_state.pop("daterange", None)
+    # Try creating the range picker; if Streamlit still complains, clear and retry
+    try:
+        return st.date_input("Date range", value=(dmin, dmax), key="daterange")
+    except Exception:
+        st.session_state.pop("daterange", None)
+        return st.date_input("Date range", value=(dmin, dmax), key="daterange")
 
 if std["Date"].notna().any():
     dates = std["Date"].dropna()
     dmin_ts = pd.to_datetime(dates.min()); dmax_ts = pd.to_datetime(dates.max())
     dmin = dmin_ts.date() if not pd.isna(dmin_ts) else date.today()
     dmax = dmax_ts.date() if not pd.isna(dmax_ts) else date.today()
-    if dmin > dmax: dmin, dmax = dmax, dmin  # safety
-    start_date, end_date = st.date_input("Date range", value=(dmin, dmax), key="daterange")
+    if dmin > dmax: dmin, dmax = dmax, dmin
+    start_date, end_date = date_range_picker(dmin, dmax)
     st.caption(f"Selected: {start_date.strftime('%d/%m/%Y')} – {end_date.strftime('%d/%m/%Y')}")
 else:
     start_date, end_date = None, None
     st.caption("No valid dates detected.")
 
 # =========================
-# (HIDDEN) Data mapping section
+# (HIDDEN) Data mapping section (kept, but not shown)
 # =========================
-# Hidden exactly as requested; nothing else changed.
 if False:
     with st.expander("Data mapping (detected columns)"):
         st.dataframe(pd.DataFrame({"Target": list(mapping.keys()),
@@ -294,7 +299,7 @@ if store_sel: f = f[f["Store"].isin(store_sel)]
 kpis, ts, by_store, by_cat, top_items = summarize(f)
 
 # =========================
-# KPI TILES  (added “Gross Profit”)
+# KPI TILES (includes Gross Profit)
 # =========================
 tickets_total = int(np.nansum(f.get("Tickets", pd.Series([0]))))
 items_total   = float(np.nansum(f.get("Qty", pd.Series([0]))))
@@ -314,7 +319,6 @@ tile_defs = [
     {"label":"Sales Conversion",      "value": f"{conv:,.1f}%",                    "color":"#bae6fd"},
     {"label":"Average Sales Per Day", "value": f"SAR {avg_per_day:,.0f}",          "color":"#fed7aa"},
 ]
-
 cols = st.columns(len(tile_defs))
 for t, col in zip(tile_defs, cols):
     col.markdown(f"""
@@ -340,7 +344,6 @@ if f["Date"].notna().any():
 else:
     fm = f.copy()
 
-# Build daily series with a named Day column
 if fm["Date"].notna().any():
     tmp = fm.copy()
     tmp["Day"] = tmp["Date"].dt.date
