@@ -70,12 +70,7 @@ a{ color: var(--brand); }
   box-shadow: var(--shadow);
 }
 hr{ border-color: var(--border); }
-
-/* tables */
 .dataframe tbody tr{ background: transparent !important; }
-
-/* hide the mapping expander wrapper (keeps it in code but not visible) */
-.hide-mapping { display: none; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -253,8 +248,12 @@ except Exception as e:
 std, mapping = standardize(raw)
 
 # =========================
-# DATE RANGE (safe)
+# DATE RANGE (safe) — FIX for ValueError from session state mismatch
 # =========================
+if "daterange" in st.session_state and not isinstance(st.session_state["daterange"], tuple):
+    # Clear old single-date state so we can use a (start,end) tuple
+    del st.session_state["daterange"]
+
 if std["Date"].notna().any():
     dates = std["Date"].dropna()
     dmin_ts = pd.to_datetime(dates.min()); dmax_ts = pd.to_datetime(dates.max())
@@ -267,12 +266,15 @@ else:
     start_date, end_date = None, None
     st.caption("No valid dates detected.")
 
-# ----- MAPPING (kept in code, hidden in UI) -----
-st.markdown("<div class='hide-mapping'>", unsafe_allow_html=True)
-with st.expander("Data mapping (detected columns)"):
-    st.dataframe(pd.DataFrame({"Target": list(mapping.keys()), "Source column": list(mapping.values())}),
-                 use_container_width=True)
-st.markdown("</div>", unsafe_allow_html=True)
+# =========================
+# (HIDDEN) Data mapping section
+# =========================
+# Hidden exactly as requested; nothing else changed.
+if False:
+    with st.expander("Data mapping (detected columns)"):
+        st.dataframe(pd.DataFrame({"Target": list(mapping.keys()),
+                                   "Source column": list(mapping.values())}),
+                     use_container_width=True)
 
 # Filters
 f = std.copy()
@@ -292,7 +294,7 @@ if store_sel: f = f[f["Store"].isin(store_sel)]
 kpis, ts, by_store, by_cat, top_items = summarize(f)
 
 # =========================
-# KPI TILES (now with GROSS PROFIT)
+# KPI TILES  (added “Gross Profit”)
 # =========================
 tickets_total = int(np.nansum(f.get("Tickets", pd.Series([0]))))
 items_total   = float(np.nansum(f.get("Qty", pd.Series([0]))))
@@ -303,18 +305,18 @@ if f["Date"].notna().any():
 else:
     avg_per_day = 0
 
-# Safe GP total (0 if we don't have COGS/GrossProfit)
-gross_profit_total = float(np.nansum(f["GrossProfit"])) if "GrossProfit" in f.columns and f["GrossProfit"].notna().any() else 0.0
+gross_profit_val = float(np.nansum(f["Sales"] - f["COGS"])) if f["COGS"].notna().any() else 0.0
 
 tile_defs = [
-    {"label":"# of Tickets","value": f"{tickets_total:,}","color":"#a7f3d0"},
-    {"label":"Total Sales","value": f"SAR {np.nansum(f['Sales']):,.0f}","color":"#fde68a"},
-    {"label":"Sales Conversion","value": f"{conv:,.1f}%","color":"#bae6fd"},
-    {"label":"Average Sales Per Day","value": f"SAR {avg_per_day:,.0f}","color":"#fed7aa"},
-    {"label":"Gross Profit","value": f"SAR {gross_profit_total:,.0f}","color":"#c7f9cc"},
+    {"label":"# of Tickets",          "value": f"{tickets_total:,}",               "color":"#a7f3d0"},
+    {"label":"Total Sales",           "value": f"SAR {np.nansum(f['Sales']):,.0f}","color":"#fde68a"},
+    {"label":"Gross Profit",          "value": f"SAR {gross_profit_val:,.0f}",     "color":"#d9f99d"},
+    {"label":"Sales Conversion",      "value": f"{conv:,.1f}%",                    "color":"#bae6fd"},
+    {"label":"Average Sales Per Day", "value": f"SAR {avg_per_day:,.0f}",          "color":"#fed7aa"},
 ]
-tcols = st.columns(5)
-for t, col in zip(tile_defs, tcols):
+
+cols = st.columns(len(tile_defs))
+for t, col in zip(tile_defs, cols):
     col.markdown(f"""
         <div class="kpi-tile" style="background:{t['color']}">
             <div style="font-size:14px; color:#334155; font-weight:700;">{t['label']}</div>
@@ -338,7 +340,7 @@ if f["Date"].notna().any():
 else:
     fm = f.copy()
 
-# Build daily series with a **named** day column to avoid KeyError
+# Build daily series with a named Day column
 if fm["Date"].notna().any():
     tmp = fm.copy()
     tmp["Day"] = tmp["Date"].dt.date
