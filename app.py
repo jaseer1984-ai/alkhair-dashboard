@@ -1,11 +1,4 @@
 # app.py — Alkhair Family Market Daily Dashboard (Power BI–style cards)
-# - Hidden data source (hard-coded published CSV)
-# - Manual Refresh button (st.rerun) + auto-refresh every X minutes
-# - Robust numeric parsing + smart Qty mapping (aliases + fuzzy)
-# - Category chart (horizontal bars), KPIs, trend, stores, top items
-# - Date range shown as DD/MM/YYYY
-# - Card-based UI styling, soft shadows, icons
-# - Download current view
 
 import io, re
 from datetime import datetime
@@ -26,7 +19,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Your published Google Sheets CSV:
+# Your published Google Sheets CSV (keep as published link with output=csv)
 GSHEET_URL = (
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vSW_ui1m_393ipZv8NAliu1rly6zeifFxMfOWpQF17hjVIDa9Ll8PiGCaz8gTRkMQ/pub?output=csv"
 )
@@ -35,14 +28,14 @@ GSHEET_URL = (
 REFRESH_MINUTES = 1
 REFRESH_SECONDS = REFRESH_MINUTES * 60
 
-# Hide sidebar completely & auto-refresh
+# Hide sidebar & auto refresh (very lightweight)
 st.markdown("<style>[data-testid='stSidebar']{display:none!important}</style>", unsafe_allow_html=True)
 components.html(f"<meta http-equiv='refresh' content='{REFRESH_SECONDS}'>", height=0)
 
 # =========================
 # THEME / CSS (Power BI–ish)
 # =========================
-css = """
+st.markdown("""
 <style>
 :root{
   --bg:#0b1220;           /* app background */
@@ -51,7 +44,6 @@ css = """
   --ink-weak:#b9c2d6;
   --accent:#4f8cff;       /* brand blue */
   --accent-2:#19c37d;     /* green */
-  --accent-3:#f7b731;     /* amber */
   --shadow:0 10px 24px rgba(0,0,0,.35);
   --radius:18px;
 }
@@ -73,9 +65,6 @@ hr{ border-color:#1f2a44; }
   display:flex; align-items:center; gap:.6rem; margin-bottom:.5rem;
   font-weight:700; color: var(--ink);
 }
-.badge{
-  font-size:.78rem; color: var(--ink-weak);
-}
 .kpi-grid{ display:grid; grid-template-columns: repeat(4, 1fr); gap:14px; }
 .kpi{
   background: linear-gradient(180deg, rgba(79,140,255,.18), rgba(79,140,255,.05));
@@ -95,13 +84,12 @@ hr{ border-color:#1f2a44; }
   width:100%; border-radius:12px; border:1px solid rgba(255,255,255,.15);
   background: linear-gradient(180deg,rgba(25,195,125,.25), rgba(25,195,125,.08));
 }
+.small{ font-size:.85rem; color:var(--ink-weak); }
 .dataframe tbody tr{ background: transparent !important; }
 [data-testid="stMetricValue"]{ color: var(--ink); }
 [data-testid="stMetricDelta"]{ color: var(--accent-2); }
-.small{ font-size:.85rem; color:var(--ink-weak); }
 </style>
-"""
-st.markdown(css, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 # =========================
 # ALIASES & HELPERS
@@ -117,29 +105,20 @@ ITEM_ALIASES    = ["item", "product", "sku", "item_name"]
 INVQ_ALIASES    = ["inventoryqty", "inventory_qty", "stock_qty", "stockqty", "stock_quantity"]
 INVV_ALIASES    = ["inventoryvalue", "inventory_value", "stock_value", "stockvalue"]
 
-ROUND_DP = 2
-
-def _normalize_cols(cols: List[str]) -> Dict[str, str]:
-    return {c.lower().strip(): c for c in cols}
-
-def _first_exact_or_fuzzy(df: pd.DataFrame, aliases: List[str], fuzzy_tokens: Optional[List[str]]=None) -> Optional[str]:
-    low = _normalize_cols(list(df.columns))
+def _first_exact_or_fuzzy(df: pd.DataFrame, aliases: List[str], fuzzy_tokens: Optional[List[str]]=None):
+    low = {c.lower().strip(): c for c in df.columns}
     for a in aliases:
         if a in low: return low[a]
     tokens = (fuzzy_tokens or []) + aliases
-    for key_low, orig in low.items():
+    for k, orig in low.items():
         for t in tokens:
-            if t in key_low:
-                return orig
+            if t in k: return orig
     return None
 
 def _gsheet_to_csv_url(url: str) -> str:
-    if "docs.google.com/spreadsheets" not in url:
-        return url
-    if "/spreadsheets/d/e/" in url and "output=csv" in url:
-        return url
-    if "/export" in url and "format=csv" in url:
-        return url
+    if "docs.google.com/spreadsheets" not in url: return url
+    if "/spreadsheets/d/e/" in url and "output=csv" in url: return url
+    if "/export" in url and "format=csv" in url: return url
     m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", url)
     if not m: return url
     sheet_id = m.group(1)
@@ -183,7 +162,7 @@ def standardize(df: pd.DataFrame):
             mapping[new] = "(missing)"
             df[new] = 0 if fill0 else np.nan
 
-    # Date
+    # Date (dayfirst)
     cd = _first_exact_or_fuzzy(df, DATE_ALIASES, ["date"])
     if cd:
         mapping["Date"]=cd; df.rename(columns={cd:"Date"}, inplace=True)
@@ -202,9 +181,11 @@ def standardize(df: pd.DataFrame):
     map_col(INVQ_ALIASES, "InventoryQty", to_num=True)
     map_col(INVV_ALIASES, "InventoryValue", to_num=True)
 
+    # Derived
     df["GrossProfit"] = (df["Sales"] - df["COGS"]) if df["COGS"].notna().any() else np.nan
     df["Store"] = df["Store"].fillna("").astype(str).str.strip()
 
+    # Fallback: if Qty all zeros but Tickets present, use Tickets
     if df["Qty"].fillna(0).sum()==0 and df["Tickets"].fillna(0).sum()>0:
         df["Qty"] = df["Tickets"].fillna(0)
         mapping["Qty"] += " (fallback from Tickets)"
@@ -258,20 +239,19 @@ def quick_insights(df, ts, by_store, by_cat, kpis):
     return out
 
 # =========================
-# HEADER BAR
+# HEADER BAR + REFRESH
 # =========================
-st.markdown("""
+st.markdown(f"""
 <div class="brandbar card">
   <div style="display:flex;align-items:center;justify-content:space-between;">
     <div style="font-weight:800;font-size:1.2rem;">🏪 Alkhair Family Market — Daily Dashboard</div>
-    <div class="small">Auto refresh: every """ + str(REFRESH_MINUTES) + """ min</div>
+    <div class="small">Auto refresh: every {REFRESH_MINUTES} min • UTC {datetime.utcnow().strftime('%H:%M:%S')}</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-# Manual refresh button
-ref_col1, ref_col2 = st.columns([8,1.2])
-with ref_col2:
+_, refresh_col = st.columns([8,1.2])
+with refresh_col:
     st.markdown('<div class="btn-refresh">', unsafe_allow_html=True)
     if st.button("🔄 Refresh", use_container_width=True, help="Reload data now"):
         st.cache_data.clear(); st.rerun()
@@ -288,26 +268,28 @@ except Exception as e:
 
 std, mapping = standardize(raw)
 
-# Date range (display DD/MM/YYYY)
+# Date range (show as DD/MM/YYYY)
 if std["Date"].notna().any():
     dmin = pd.to_datetime(std["Date"].min()).date()
     dmax = pd.to_datetime(std["Date"].max()).date()
-    dr = st.date_input("Date range", value=(dmin, dmax))
-    if isinstance(dr, tuple) and len(dr)==2:
-        st.caption(f"Selected: {dr[0].strftime('%d/%m/%Y')} – {dr[1].strftime('%d/%m/%Y')} (UTC {datetime.utcnow().strftime('%H:%M:%S')})")
+    start_date, end_date = st.date_input("Date range", value=(dmin, dmax))
+    st.caption(f"Selected: {start_date.strftime('%d/%m/%Y')} – {end_date.strftime('%d/%m/%Y')}")
 else:
-    dr=None
+    start_date, end_date = None, None
+    st.caption("No valid dates detected.")
 
-# Show mapping (debug)
+# Mapping (debug)
 with st.expander("Data mapping (detected columns)"):
     st.dataframe(pd.DataFrame({"Target": list(mapping.keys()), "Source column": list(mapping.values())}),
                  use_container_width=True)
 
 # Filters
 f = std.copy()
-if dr and isinstance(dr, tuple) and len(dr)==2 and f["Date"].notna().any():
-    d1 = pd.to_datetime(dr[0]); d2 = pd.to_datetime(dr[1]) + pd.Timedelta(days=1)
+if start_date and end_date and f["Date"].notna().any():
+    d1 = pd.to_datetime(start_date)
+    d2 = pd.to_datetime(end_date) + pd.Timedelta(days=1)
     f = f[(f["Date"]>=d1) & (f["Date"]<d2)]
+
 stores = sorted([s for s in f["Store"].dropna().unique().tolist() if s])
 default_stores = [s for s in ["Magnus","Alkhair","Zelayi"] if s in stores] or stores
 store_sel = st.multiselect("Store(s)", stores, default=default_stores)
@@ -320,30 +302,17 @@ kpis, ts, by_store, by_cat, top_items = summarize(f)
 
 # KPI CARDS
 st.markdown('<div class="kpi-grid">', unsafe_allow_html=True)
-k1,k2,k3,k4 = st.columns(4)
-with k1:
-    st.markdown('<div class="kpi">', unsafe_allow_html=True)
-    st.markdown('<div class="label"><span class="icon">💵</span>Sales (SAR)</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="value">{kpis.get("Sales",0):,.2f}</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-with k2:
-    st.markdown('<div class="kpi">', unsafe_allow_html=True)
-    st.markdown('<div class="label"><span class="icon">📈</span>Gross Profit (SAR)</div>', unsafe_allow_html=True)
-    gp = kpis.get("Gross Profit")
-    st.markdown(f'<div class="value">{"-" if gp is None else f"{gp:,.2f}"}</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-with k3:
-    st.markdown('<div class="kpi">', unsafe_allow_html=True)
-    st.markdown('<div class="label"><span class="icon">🎟️</span>Tickets</div>', unsafe_allow_html=True)
-    t = kpis.get("Tickets")
-    st.markdown(f'<div class="value">{"-" if t is None else f"{t:,.0f}"}</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-with k4:
-    st.markdown('<div class="kpi">', unsafe_allow_html=True)
-    st.markdown('<div class="label"><span class="icon">🧺</span>Avg Basket (SAR)</div>', unsafe_allow_html=True)
-    ab = kpis.get("Avg Basket")
-    st.markdown(f'<div class="value">{"-" if ab is None else f"{ab:,.2f}"}</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+for label, icon, val in [
+    ("Sales (SAR)", "💵", f"{kpis.get('Sales', 0):,.2f}"),
+    ("Gross Profit (SAR)", "📈", "-" if kpis.get("Gross Profit") is None else f"{kpis.get('Gross Profit'):,.2f}"),
+    ("Tickets", "🎟️", "-" if kpis.get("Tickets") is None else f"{kpis.get('Tickets'):,.0f}"),
+    ("Avg Basket (SAR)", "🧺", "-" if kpis.get("Avg Basket") is None else f"{kpis.get('Avg Basket'):,.2f}"),
+]:
+    with st.container():
+        st.markdown('<div class="kpi">', unsafe_allow_html=True)
+        st.markdown(f'<div class="label"><span class="icon">{icon}</span>{label}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="value">{val}</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown("<br/>", unsafe_allow_html=True)
@@ -351,9 +320,86 @@ st.markdown("<br/>", unsafe_allow_html=True)
 # =========================
 # CHART CARDS
 # =========================
-c1, c2 = st.columns([1.2,1])
-with c1:
+col1, col2 = st.columns([1.2, 1])
+with col1:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<div class="card-header">📈 Sales Trend</div>', unsafe_allow_html=True)
     if not ts.empty:
-        st.line_chart(ts.set_index("Date
+        st.line_chart(ts.set_index("Date")[["Sales"]])
+    else:
+        st.info("No data for selected period.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with col2:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-header">🏬 Sales by Store</div>', unsafe_allow_html=True)
+    if not by_store.empty:
+        st.bar_chart(by_store.set_index("Store")[["Sales"]])
+    else:
+        st.info("No store data.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown("<br/>", unsafe_allow_html=True)
+col3, col4 = st.columns(2)
+
+with col3:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-header">🛍️ Sales by Category</div>', unsafe_allow_html=True)
+    if not by_cat.empty:
+        # Horizontal bar for readability
+        dfc = by_cat.copy().sort_values("Sales", ascending=True)
+        fig, ax = plt.subplots(figsize=(6,4))
+        ax.barh(dfc["Category"].astype(str), dfc["Sales"])
+        ax.set_xlabel("Sales (SAR)")
+        ax.set_ylabel("")
+        ax.ticklabel_format(style="plain", axis="x")
+        for i, v in enumerate(dfc["Sales"]):
+            ax.text(v, i, f" {v:,.0f}", va="center")
+        st.pyplot(fig)
+    else:
+        st.info("No category data.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with col4:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-header">⭐ Top Items</div>', unsafe_allow_html=True)
+    if not top_items.empty:
+        show = top_items.head(10).copy()
+        show["Sales"] = show["Sales"].map(lambda x: f"{x:,.0f}")
+        if show["GrossProfit"].notna().any():
+            show["GrossProfit"] = show["GrossProfit"].map(lambda x: f"{x:,.0f}")
+        show["Qty"] = show["Qty"].fillna(0).astype(float).astype(int)
+        st.dataframe(show, use_container_width=True)
+    else:
+        st.info("No item data.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# =========================
+# QUICK INSIGHTS + DOWNLOAD
+# =========================
+st.markdown("<br/>", unsafe_allow_html=True)
+st.markdown('<div class="card">', unsafe_allow_html=True)
+st.markdown('<div class="card-header">💡 Quick Insights</div>', unsafe_allow_html=True)
+ins = quick_insights(f, ts, by_store, by_cat, kpis)
+if ins:
+    for i in ins:
+        st.write(i)
+else:
+    st.write("No insights for current filters.")
+st.markdown('</div>', unsafe_allow_html=True)
+
+# Download filtered view as Excel
+buff = io.BytesIO()
+with pd.ExcelWriter(buff, engine="xlsxwriter") as wr:
+    f.to_excel(wr, sheet_name="Data", index=False)
+    if not ts.empty:        ts.to_excel(wr, sheet_name="TimeSeries", index=False)
+    if not by_store.empty:  by_store.to_excel(wr, sheet_name="ByStore", index=False)
+    if not by_cat.empty:    by_cat.to_excel(wr, sheet_name="ByCategory", index=False)
+    if not top_items.empty: top_items.to_excel(wr, sheet_name="TopItems", index=False)
+
+st.download_button(
+    "⬇️ Download Excel (current view)",
+    data=buff.getvalue(),
+    file_name=f"Alkhair_Dashboard_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
