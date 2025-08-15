@@ -1,9 +1,11 @@
-# app.py — Alkhair Family Market Daily Dashboard (no Cash/Bank KPIs)
-# Paste a Google Sheets link (share or published CSV) OR upload CSV/Excel.
-# The app auto-converts normal sheet links, and accepts published CSV links directly.
+# app.py — Alkhair Family Market Daily Dashboard
+# - Hidden data source (hard-coded published CSV)
+# - Auto refresh + manual Refresh button
+# - Robust numeric parsing (fixes Qty=0 issues)
+# - Clean horizontal bar for Sales by Category
+# - No cash/bank KPIs
 
 import io, re
-from urllib.parse import urlparse, parse_qs
 from datetime import datetime
 from typing import List
 
@@ -11,25 +13,44 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
+import streamlit.components.v1 as components
 
-# ---------- Page ----------
-st.set_page_config(page_title="Alkhair Family Market — Daily Dashboard", layout="wide")
+# ------------------------------------------------------------------------------------
+# CONFIG
+# ------------------------------------------------------------------------------------
+st.set_page_config(
+    page_title="Alkhair Family Market — Daily Dashboard",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
-# ---------- Column aliases ----------
+GSHEET_URL = (
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vSW_ui1m_393ipZv8NAliu1rly6zeifFxMfOWpQF17hjVIDa9Ll8PiGCaz8gTRkMQ/pub?output=csv"
+)
+REFRESH_SECONDS = 60  # auto refresh interval
+
+# Hide sidebar
+st.markdown("<style>[data-testid='stSidebar']{display:none!important}</style>", unsafe_allow_html=True)
+# Auto refresh (lightweight)
+components.html(f"<meta http-equiv='refresh' content='{REFRESH_SECONDS}'>", height=0)
+
+# ------------------------------------------------------------------------------------
+# ALIASES & HELPERS
+# ------------------------------------------------------------------------------------
 DATE_ALIASES    = ["date", "bill_date", "txn_date"]
 STORE_ALIASES   = ["store", "branch", "location"]
 SALES_ALIASES   = ["sales", "amount", "net_sales", "revenue"]
 COGS_ALIASES    = ["cogs", "cost", "purchase_cost"]
-QTY_ALIASES     = ["qty", "quantity"]
-TICKETS_ALIASES = ["tickets", "bills", "invoice_count"]
+# Expanded qty aliases to catch different headings
+QTY_ALIASES     = ["qty", "quantity", "qty_sold", "quantity_sold", "units", "pieces", "pcs"]
+TICKETS_ALIASES = ["tickets", "bills", "invoice_count", "transactions"]
 CAT_ALIASES     = ["category", "cat"]
 ITEM_ALIASES    = ["item", "product", "sku"]
-INVQ_ALIASES    = ["inventoryqty", "inventory_qty", "stock_qty"]
-INVV_ALIASES    = ["inventoryvalue", "inventory_value", "stock_value"]
+INVQ_ALIASES    = ["inventoryqty", "inventory_qty", "stock_qty", "stockqty", "stock_quantity"]
+INVV_ALIASES    = ["inventoryvalue", "inventory_value", "stock_value", "stockvalue"]
 
 ROUND_DP = 2
 
-# ---------- Helpers ----------
 def _first_col(df: pd.DataFrame, aliases: List[str]):
     low = {c.lower().strip(): c for c in df.columns}
     for a in aliases:
@@ -38,94 +59,75 @@ def _first_col(df: pd.DataFrame, aliases: List[str]):
     return None
 
 def _gsheet_to_csv_url(url: str) -> str:
-    """
-    Accepts:
-      - Normal sheet links: .../spreadsheets/d/<ID>/edit#gid=...
-      - Export links:       .../spreadsheets/d/<ID>/export?format=csv&gid=...
-      - Published links:    .../spreadsheets/d/e/<PUB_ID>/pub?output=csv
-    Returns a direct CSV URL. For published links (/d/e/...), returns the URL unchanged.
-    """
     if "docs.google.com/spreadsheets" not in url:
         return url
-
-    # If it's already a published CSV link, just return it.
     if "/spreadsheets/d/e/" in url and "output=csv" in url:
-        return url
-
-    # If it's already an export csv link, return it
+        return url  # already a published CSV
     if "/export" in url and "format=csv" in url:
-        return url
-
-    # Otherwise, convert /d/<ID> style links to export csv with gid
+        return url  # already an export CSV
     m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", url)
     if not m:
         return url
     sheet_id = m.group(1)
-
-    # Try to get gid from query/hash; default 0
     gid = "0"
     m2 = re.search(r"gid=(\d+)", url)
     if m2:
         gid = m2.group(1)
-
     return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
 
-@st.cache_data(show_spinner=False)
-def load_data(files, url):
-    frames = []
+# robust numeric conversion: handles "1,234", " 45 ", "SAR 120.5", "(1,230)"
+_num_cleanup_re = re.compile(r"[^\d\-\.\,()]")
+def _to_num(x):
+    if isinstance(x, (int, float, np.number)): return x
+    if x is None: return np.nan
+    s = str(x).strip()
+    if s == "": return np.nan
+    s = _num_cleanup_re.sub("", s)         # drop letters/currency
+    neg = False
+    if s.startswith("(") and s.endswith(")"):
+        neg = True
+        s = s[1:-1]
+    s = s.replace(",", "")
+    try:
+        v = float(s)
+        return -v if neg else v
+    except Exception:
+        return np.nan
 
-    # URL (optional)
-    if url:
-        try:
-            url2 = _gsheet_to_csv_url(url.strip())
-            frames.append(pd.read_csv(url2))
-        except Exception as e:
-            st.warning(f"Couldn't read URL: {e}")
-
-    # Uploaded files (optional)
-    for f in files or []:
-        try:
-            if f.name.lower().endswith((".xlsx", ".xls")):
-                frames.append(pd.read_excel(f))
-            else:
-                frames.append(pd.read_csv(f))
-        except Exception as e:
-            st.warning(f"Couldn't read file {f.name}: {e}")
-
-    if not frames:
-        return pd.DataFrame()
-
-    df = pd.concat(frames, ignore_index=True)
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
+@st.cache_data(ttl=0, show_spinner=False)
+def load_data(url: str):
+    url2 = _gsheet_to_csv_url(url.strip())
+    return pd.read_csv(url2)
 
 def standardize(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty: return df
+    if df.empty: return df.copy()
     df = df.rename(columns={c: c.strip().lower() for c in df.columns})
 
-    def map_col(aliases, new, to_num=False):
+    def map_col(aliases, new, to_num=False, fill0=False):
         c = _first_col(df, aliases)
         if c is not None:
             df.rename(columns={c: new}, inplace=True)
             if to_num:
-                df[new] = pd.to_numeric(df[new], errors="coerce")
+                df[new] = df[new].map(_to_num)
+                if fill0:
+                    df[new] = df[new].fillna(0)
         else:
-            df[new] = np.nan
+            df[new] = 0 if fill0 else np.nan
 
     map_col(DATE_ALIASES, "Date")
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce", dayfirst=True)
 
-    map_col(STORE_ALIASES, "Store")
-    map_col(SALES_ALIASES, "Sales", True)
-    map_col(COGS_ALIASES, "COGS", True)
-    map_col(QTY_ALIASES, "Qty", True)
-    map_col(TICKETS_ALIASES, "Tickets", True)
-    map_col(CAT_ALIASES, "Category")
-    map_col(ITEM_ALIASES, "Item")
-    map_col(INVQ_ALIASES, "InventoryQty", True)
-    map_col(INVV_ALIASES, "InventoryValue", True)
+    map_col(STORE_ALIASES,   "Store")
+    map_col(SALES_ALIASES,   "Sales",          to_num=True, fill0=True)
+    map_col(COGS_ALIASES,    "COGS",           to_num=True)     # COGS may be blank
+    map_col(QTY_ALIASES,     "Qty",            to_num=True, fill0=True)
+    map_col(TICKETS_ALIASES, "Tickets",        to_num=True)
+    map_col(CAT_ALIASES,     "Category")
+    map_col(ITEM_ALIASES,    "Item")
+    map_col(INVQ_ALIASES,    "InventoryQty",   to_num=True)
+    map_col(INVV_ALIASES,    "InventoryValue", to_num=True)
 
-    df["GrossProfit"] = df["Sales"] - df["COGS"] if df["COGS"].notna().any() else np.nan
+    df["GrossProfit"] = (df["Sales"] - df["COGS"]) if df["COGS"].notna().any() else np.nan
     df["Store"] = df["Store"].fillna("").astype(str).str.strip()
     return df
 
@@ -194,22 +196,27 @@ def quick_insights(df, ts, by_store, by_cat, kpis):
             out.append(f"🎟️ Avg basket: **SAR {float(np.nansum(df['Sales']))/t:,.2f}**")
     return out
 
-# ---------- UI ----------
+# ------------------------------------------------------------------------------------
+# UI
+# ------------------------------------------------------------------------------------
 st.markdown("<h1 style='text-align:center;'>Alkhair Family Market — Daily Dashboard</h1>", unsafe_allow_html=True)
 
-with st.sidebar:
-    st.header("Data Source")
-    url = st.text_input(
-        "Google Sheets (share or published CSV) / CSV / Excel URL",
-        value="https://docs.google.com/spreadsheets/d/e/2PACX-1vSW_ui1m_393ipZv8NAliu1rly6zeifFxMfOWpQF17hjVIDa9Ll8PiGCaz8gTRkMQ/pub?output=csv",
-    )
-    files = st.file_uploader("Or upload CSV/Excel", accept_multiple_files=True, type=["csv","xlsx","xls"])
-    st.caption("Tip: if you paste a normal Sheets link, the app converts it to CSV automatically. Published CSV links work as-is.")
+# Top-right Refresh button
+top_left, top_right = st.columns([1, 0.18])
+with top_right:
+    if st.button("🔄 Refresh", use_container_width=True, help="Reload data now"):
+        st.cache_data.clear()
+        try: st.rerun()
+        except Exception: st.experimental_rerun()
 
-raw = load_data(files, url)
-if raw.empty:
-    st.info("No rows loaded. Check the link/file permissions or try uploading a CSV/Excel to test.")
+# Load data
+try:
+    raw = load_data(GSHEET_URL)
+except Exception as e:
+    st.error(f"Failed to load data: {e}")
     st.stop()
+
+st.caption(f"Auto refresh: every {REFRESH_SECONDS}s • Last refreshed at {pd.Timestamp.now(tz='UTC').strftime('%Y-%m-%d %H:%M:%S')} UTC")
 
 std = standardize(raw)
 
@@ -234,7 +241,7 @@ if date_rng and isinstance(date_rng, tuple) and len(date_rng) == 2 and f["Date"]
 # Summaries
 kpis, ts, by_store, by_cat, top_items = summarize(f)
 
-# KPI cards
+# KPIs
 c1, c2, c3, c4 = st.columns(4)
 with c1: st.metric("Sales (SAR)", f"{kpis.get('Sales', 0):,.2f}")
 with c2:
@@ -265,20 +272,42 @@ with right:
         st.info("No store data.")
 
 col1, col2 = st.columns([1,1])
+
+# --- Sales by Category as horizontal bar (clearer than pie) ---
 with col1:
     st.subheader("🧺 Sales by Category")
     if not by_cat.empty:
-        fig, ax = plt.subplots(figsize=(5,4))
-        ax.pie(by_cat["Sales"].values, labels=by_cat["Category"].astype(str).values,
-               autopct="%1.0f%%", startangle=90)
-        ax.axis("equal")
+        N = 8  # keep top N, group rest as "Other"
+        dfc = by_cat.copy()
+        dfc["Sales"] = dfc["Sales"].astype(float)
+        dfc = dfc.sort_values("Sales", ascending=True)
+        if len(dfc) > N:
+            top = dfc.tail(N)
+            other = pd.DataFrame({"Category": ["Other"], "Sales": [dfc.iloc[:-N]["Sales"].sum()]})
+            dfc = pd.concat([top, other], ignore_index=True)
+
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.barh(dfc["Category"].astype(str), dfc["Sales"])
+        ax.set_xlabel("Sales (SAR)")
+        ax.set_ylabel("")
+        ax.ticklabel_format(style="plain", axis="x")
+        for i, v in enumerate(dfc["Sales"]):
+            ax.text(v, i, f" {v:,.0f}", va="center")
         st.pyplot(fig)
     else:
         st.info("No category column found.")
+
 with col2:
     st.subheader("⭐ Top Items")
     if not top_items.empty:
-        st.dataframe(top_items.head(10), use_container_width=True)
+        # Nice formatting for table
+        show = top_items.head(10).copy()
+        show["Sales"] = show["Sales"].map(lambda x: f"{x:,.0f}")
+        if show["GrossProfit"].notna().any():
+            show["GrossProfit"] = show["GrossProfit"].map(lambda x: f"{x:,.0f}")
+        # Qty as integer
+        show["Qty"] = show["Qty"].fillna(0).astype(float).astype(int)
+        st.dataframe(show, use_container_width=True)
     else:
         st.info("No item column found.")
 
