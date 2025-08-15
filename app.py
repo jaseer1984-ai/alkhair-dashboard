@@ -1,8 +1,8 @@
 # app.py — Alkhair Family Market Daily Dashboard
 # - Hidden data source (hard-coded published CSV)
-# - Auto refresh + manual Refresh button
-# - Robust numeric parsing (fixes Qty=0 issues)
-# - Clean horizontal bar for Sales by Category
+# - Manual Refresh button (st.rerun) + auto-refresh every X minutes
+# - Robust numeric parsing for Sales/Qty/etc.
+# - Category chart as readable horizontal bars
 # - No cash/bank KPIs
 
 import io, re
@@ -24,14 +24,20 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# Your published CSV link:
 GSHEET_URL = (
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vSW_ui1m_393ipZv8NAliu1rly6zeifFxMfOWpQF17hjVIDa9Ll8PiGCaz8gTRkMQ/pub?output=csv"
 )
-REFRESH_SECONDS = 60  # auto refresh interval
 
-# Hide sidebar
+# ======== Auto-refresh interval ========
+REFRESH_MINUTES = 1          # <-- change this (minutes)
+REFRESH_SECONDS = REFRESH_MINUTES * 60
+# ======================================
+
+# Hide sidebar entirely
 st.markdown("<style>[data-testid='stSidebar']{display:none!important}</style>", unsafe_allow_html=True)
-# Auto refresh (lightweight)
+
+# Auto refresh page every REFRESH_SECONDS (very lightweight & reliable on Streamlit Cloud)
 components.html(f"<meta http-equiv='refresh' content='{REFRESH_SECONDS}'>", height=0)
 
 # ------------------------------------------------------------------------------------
@@ -41,7 +47,6 @@ DATE_ALIASES    = ["date", "bill_date", "txn_date"]
 STORE_ALIASES   = ["store", "branch", "location"]
 SALES_ALIASES   = ["sales", "amount", "net_sales", "revenue"]
 COGS_ALIASES    = ["cogs", "cost", "purchase_cost"]
-# Expanded qty aliases to catch different headings
 QTY_ALIASES     = ["qty", "quantity", "qty_sold", "quantity_sold", "units", "pieces", "pcs"]
 TICKETS_ALIASES = ["tickets", "bills", "invoice_count", "transactions"]
 CAT_ALIASES     = ["category", "cat"]
@@ -75,14 +80,14 @@ def _gsheet_to_csv_url(url: str) -> str:
         gid = m2.group(1)
     return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
 
-# robust numeric conversion: handles "1,234", " 45 ", "SAR 120.5", "(1,230)"
+# Robust numeric conversion: handles "1,234", " 45 ", "SAR 120.5", "(1,230)"
 _num_cleanup_re = re.compile(r"[^\d\-\.\,()]")
 def _to_num(x):
-    if isinstance(x, (int, float, np.number)): return x
+    if isinstance(x, (int, float, np.number)): return float(x)
     if x is None: return np.nan
     s = str(x).strip()
     if s == "": return np.nan
-    s = _num_cleanup_re.sub("", s)         # drop letters/currency
+    s = _num_cleanup_re.sub("", s)
     neg = False
     if s.startswith("(") and s.endswith(")"):
         neg = True
@@ -119,7 +124,7 @@ def standardize(df: pd.DataFrame) -> pd.DataFrame:
 
     map_col(STORE_ALIASES,   "Store")
     map_col(SALES_ALIASES,   "Sales",          to_num=True, fill0=True)
-    map_col(COGS_ALIASES,    "COGS",           to_num=True)     # COGS may be blank
+    map_col(COGS_ALIASES,    "COGS",           to_num=True)     # may be blank
     map_col(QTY_ALIASES,     "Qty",            to_num=True, fill0=True)
     map_col(TICKETS_ALIASES, "Tickets",        to_num=True)
     map_col(CAT_ALIASES,     "Category")
@@ -199,15 +204,14 @@ def quick_insights(df, ts, by_store, by_cat, kpis):
 # ------------------------------------------------------------------------------------
 # UI
 # ------------------------------------------------------------------------------------
-st.markdown("<h1 style='text-align:center;'>Alkhair Family Market — Daily Dashboard</h1>", unsafe_allow_html=True)
-
-# Top-right Refresh button
-top_left, top_right = st.columns([1, 0.18])
-with top_right:
+# Title + Refresh
+title_col, refresh_col = st.columns([1, 0.18])
+with title_col:
+    st.markdown("<h1 style='text-align:center;'>Alkhair Family Market — Daily Dashboard</h1>", unsafe_allow_html=True)
+with refresh_col:
     if st.button("🔄 Refresh", use_container_width=True, help="Reload data now"):
         st.cache_data.clear()
-        try: st.rerun()
-        except Exception: st.experimental_rerun()
+        st.rerun()
 
 # Load data
 try:
@@ -216,7 +220,10 @@ except Exception as e:
     st.error(f"Failed to load data: {e}")
     st.stop()
 
-st.caption(f"Auto refresh: every {REFRESH_SECONDS}s • Last refreshed at {pd.Timestamp.now(tz='UTC').strftime('%Y-%m-%d %H:%M:%S')} UTC")
+st.caption(
+    f"Auto refresh: every {REFRESH_MINUTES} min • Last refreshed at "
+    f"{pd.Timestamp.now(tz='UTC').strftime('%Y-%m-%d %H:%M:%S')} UTC"
+)
 
 std = standardize(raw)
 
@@ -241,7 +248,7 @@ if date_rng and isinstance(date_rng, tuple) and len(date_rng) == 2 and f["Date"]
 # Summaries
 kpis, ts, by_store, by_cat, top_items = summarize(f)
 
-# KPIs
+# KPI cards
 c1, c2, c3, c4 = st.columns(4)
 with c1: st.metric("Sales (SAR)", f"{kpis.get('Sales', 0):,.2f}")
 with c2:
@@ -271,13 +278,13 @@ with right:
     else:
         st.info("No store data.")
 
-col1, col2 = st.columns([1,1])
+col1, col2 = st.columns([1, 1])
 
-# --- Sales by Category as horizontal bar (clearer than pie) ---
+# Sales by Category — horizontal bars (clear)
 with col1:
     st.subheader("🧺 Sales by Category")
     if not by_cat.empty:
-        N = 8  # keep top N, group rest as "Other"
+        N = 8  # keep top N, group the rest into "Other"
         dfc = by_cat.copy()
         dfc["Sales"] = dfc["Sales"].astype(float)
         dfc = dfc.sort_values("Sales", ascending=True)
@@ -297,15 +304,14 @@ with col1:
     else:
         st.info("No category column found.")
 
+# Top Items
 with col2:
     st.subheader("⭐ Top Items")
     if not top_items.empty:
-        # Nice formatting for table
         show = top_items.head(10).copy()
         show["Sales"] = show["Sales"].map(lambda x: f"{x:,.0f}")
         if show["GrossProfit"].notna().any():
             show["GrossProfit"] = show["GrossProfit"].map(lambda x: f"{x:,.0f}")
-        # Qty as integer
         show["Qty"] = show["Qty"].fillna(0).astype(float).astype(int)
         st.dataframe(show, use_container_width=True)
     else:
