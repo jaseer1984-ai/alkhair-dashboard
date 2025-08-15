@@ -2,7 +2,7 @@
 
 import io, re
 from datetime import datetime, date
-from typing import List, Optional, Dict
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -264,12 +264,19 @@ else:
     start_date, end_date = None, None
     st.caption("No valid dates detected.")
 
-# Mapping (debug)
-with st.expander("Data mapping (detected columns)"):
-    st.dataframe(pd.DataFrame({"Target": list(mapping.keys()), "Source column": list(mapping.values())}),
-                 use_container_width=True)
+# =========================
+# Mapping (debug) — hidden in dashboard
+# =========================
+if False:  # set True to show the mapping expander
+    with st.expander("Data mapping (detected columns)"):
+        st.dataframe(
+            pd.DataFrame({"Target": list(mapping.keys()), "Source column": list(mapping.values())}),
+            use_container_width=True
+        )
 
+# =========================
 # Filters
+# =========================
 f = std.copy()
 if start_date and end_date and f["Date"].notna().any():
     d1 = pd.to_datetime(start_date)
