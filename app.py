@@ -930,6 +930,17 @@ class BranchVisualization:
             annotation_text="🌟 Excellence",
             annotation_position="bottom right"
         )
+        )
+        
+        # Excellence line at 95%
+        fig.add_hline(
+            y=95,
+            line_dash="dot",
+            line_color="#10b981",
+            line_width=2,
+            annotation_text="🌟 Excellence",
+            annotation_position="bottom right"
+        )
         
         fig.update_layout(
             title="Branch Sales Performance Comparison",
