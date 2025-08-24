@@ -1360,4 +1360,331 @@ def render_insights_tab(df: pd.DataFrame, kpis: Dict[str, Any]):
                 </div>
                 <p style="margin: 0; color: var(--text-secondary); font-weight: 500;">{description}</p>
             </div>
-            """, unsafe_allow_html=True
+            """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("### 🎯 Smart Recommendations")
+        
+        recommendations = []
+        
+        # Revenue optimization
+        if kpis['avg_basket'] < 50:
+            recommendations.append("🎯 **Bundle Products** - Increase average basket size through product bundles")
+        
+        if kpis['discount_rate'] > 15:
+            recommendations.append("💰 **Review Pricing** - High discount rate may impact profitability")
+        
+        if kpis['items_per_basket'] < 2:
+            recommendations.append("🛍️ **Cross-sell Training** - Train staff on suggesting complementary items")
+        
+        if kpis['gross_margin'] < 25:
+            recommendations.append("📊 **Cost Analysis** - Review supplier costs and pricing strategy")
+        
+        if kpis['growth_rate'] < 0:
+            recommendations.append("📈 **Marketing Focus** - Implement customer acquisition campaigns")
+        
+        # Operational recommendations
+        if df["Date"].notna().any():
+            # Peak day analysis
+            day_performance = df.groupby(df["Date"].dt.day_name())["Sales"].mean()
+            if not day_performance.empty:
+                peak_day = day_performance.idxmax()
+                recommendations.append(f"⭐ **{peak_day} Strategy** - Replicate {peak_day} success across other days")
+        
+        if not recommendations:
+            recommendations = [
+                "🎉 **Excellent Performance** - All metrics are healthy",
+                "🚀 **Scale Operations** - Consider expansion opportunities",
+                "💡 **Innovation Focus** - Explore new product categories"
+            ]
+        
+        for rec in recommendations:
+            st.markdown(f"""
+            <div class="insight-card" style="padding: 16px;">
+                <p style="margin: 0; font-weight: 600; color: var(--text-primary);">{rec}</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+def render_data_export_tab(df: pd.DataFrame, column_mapping: Dict[str, str]):
+    """Render data management and export"""
+    st.markdown("## 📊 Data Management & Export")
+    
+    # Data quality overview
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown("""
+        <div class="alert-card">
+            <h4 style="margin: 0 0 12px 0;">📅 Data Coverage</h4>
+        """, unsafe_allow_html=True)
+        if df["Date"].notna().any():
+            st.write(f"**From:** {df['Date'].min().strftime('%Y-%m-%d')}")
+            st.write(f"**To:** {df['Date'].max().strftime('%Y-%m-%d')}")
+            st.write(f"**Days:** {df['Date'].dt.date.nunique()}")
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+        <div class="alert-card">
+            <h4 style="margin: 0 0 12px 0;">📊 Data Volume</h4>
+        """, unsafe_allow_html=True)
+        st.write(f"**Records:** {len(df):,}")
+        st.write(f"**Stores:** {df['Store'].nunique()}")
+        st.write(f"**Products:** {df['Item'].nunique()}")
+        st.write(f"**Categories:** {df['Category'].nunique()}")
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("""
+        <div class="alert-card">
+            <h4 style="margin: 0 0 12px 0;">✅ Data Quality</h4>
+        """, unsafe_allow_html=True)
+        completeness = (1 - df.isnull().sum().sum() / (len(df) * len(df.columns))) * 100
+        st.write(f"**Completeness:** {completeness:.1f}%")
+        st.write(f"**Sales Records:** {(df['Sales'] > 0).sum():,}")
+        st.write(f"**Valid Dates:** {df['Date'].notna().sum():,}")
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown("""
+        <div class="alert-card">
+            <h4 style="margin: 0 0 12px 0;">📥 Export Options</h4>
+        """, unsafe_allow_html=True)
+        
+        # Enhanced Excel export
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            # Main data
+            df.to_excel(writer, sheet_name='Complete Data', index=False)
+            
+            # Store summary
+            if df["Store"].nunique() > 1:
+                store_summary = df.groupby("Store").agg({
+                    "Sales": ["sum", "mean"],
+                    "Tickets": "sum",
+                    "Qty": "sum"
+                }).round(2)
+                store_summary.to_excel(writer, sheet_name='Store Summary')
+            
+            # Daily summary
+            if df["Date"].notna().any():
+                daily_summary = df.groupby(df["Date"].dt.date).agg({
+                    "Sales": "sum",
+                    "Tickets": "sum",
+                    "Qty": "sum"
+                }).reset_index()
+                daily_summary.to_excel(writer, sheet_name='Daily Summary', index=False)
+            
+            # Product summary
+            if df["Item"].notna().any():
+                product_summary = df.groupby("Item").agg({
+                    "Sales": "sum",
+                    "Qty": "sum",
+                    "GrossProfit": "sum"
+                }).sort_values("Sales", ascending=False).head(50)
+                product_summary.to_excel(writer, sheet_name='Top Products')
+        
+        st.download_button(
+            "📊 Download Excel Report",
+            buffer.getvalue(),
+            f"Alkhair_Analytics_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        
+        # CSV export
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False)
+        st.download_button(
+            "📄 Download CSV",
+            csv_buffer.getvalue(),
+            f"Alkhair_Data_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            "text/csv"
+        )
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    # Column mapping
+    st.markdown("### 🔗 Data Structure Analysis")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**📋 Column Mappings**")
+        mapping_data = []
+        for target, source in column_mapping.items():
+            status = "✅" if source != "(missing)" else "❌"
+            mapping_data.append({"Status": status, "Target": target, "Source": source})
+        
+        mapping_df = pd.DataFrame(mapping_data)
+        st.dataframe(mapping_df, use_container_width=True, hide_index=True)
+    
+    with col2:
+        st.markdown("**📊 Data Preview**")
+        st.dataframe(df.head(10), use_container_width=True)
+
+# =========================
+# MAIN APPLICATION
+# =========================
+def main():
+    """Main application with beautiful design"""
+    
+    # Apply stunning CSS
+    apply_stunning_css()
+    
+    # Auto-refresh functionality
+    components.html(
+        f"<meta http-equiv='refresh' content='{config.REFRESH_MINUTES * 60}'>",
+        height=0
+    )
+    
+    # Beautiful Hero Header
+    st.markdown(f"""
+    <div class="hero-header">
+        <div class="hero-content">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div>
+                    <h1 style="margin: 0; font-size: 2.5rem; font-weight: 900; text-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        🏪 Alkhair Family Market
+                    </h1>
+                    <p style="margin: 8px 0 0 0; font-size: 1.2rem; opacity: 0.9; font-weight: 500;">
+                        Executive Analytics Dashboard • Real-time Business Intelligence
+                    </p>
+                </div>
+                <div style="text-align: right; opacity: 0.9;">
+                    <div style="font-size: 1rem; font-weight: 600;">⚡ Live Data</div>
+                    <div style="font-size: 0.9rem;">Updated: {datetime.now().strftime('%H:%M:%S')}</div>
+                    <div style="font-size: 0.85rem;">Auto-refresh: {config.REFRESH_MINUTES}min</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Refresh button with style
+    col1, col2 = st.columns([10, 1])
+    with col2:
+        if st.button("🔄 Refresh", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+    
+    # Load data
+    @st.cache_data(ttl=0, show_spinner=False)
+    def load_dashboard_data(url: str) -> pd.DataFrame:
+        """Load data from Google Sheets with error handling"""
+        try:
+            return pd.read_csv(url)
+        except Exception as e:
+            st.error(f"Failed to load data: {str(e)}")
+            return pd.DataFrame()
+    
+    # Data loading with beautiful spinner
+    with st.spinner("🔄 Loading live data..."):
+        raw_data = load_dashboard_data(config.DATA_SOURCE_URL)
+    
+    if raw_data.empty:
+        st.error("❌ No data could be loaded from the source.")
+        st.stop()
+    
+    # Process data
+    data, column_mapping = DataProcessor.standardize_dataframe(raw_data)
+    
+    # Beautiful Filter Section
+    st.markdown("""
+    <div class="filter-section">
+        <h3 style="margin: 0 0 20px 0; color: var(--text-primary);">🔍 Data Filters</h3>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3, col4 = st.columns([2, 2, 3, 3])
+    
+    # Date range filter
+    if data["Date"].notna().any():
+        date_min = data["Date"].min().date()
+        date_max = data["Date"].max().date()
+        
+        with col1:
+            start_date = st.date_input("📅 Start Date", value=date_min)
+        with col2:
+            end_date = st.date_input("📅 End Date", value=date_max)
+        
+        mask = (data["Date"].dt.date >= start_date) & (data["Date"].dt.date <= end_date)
+        filtered_data = data[mask].copy()
+    else:
+        filtered_data = data.copy()
+    
+    # Store filter
+    if filtered_data["Store"].nunique() > 1:
+        stores = sorted([s for s in filtered_data["Store"].unique() if s and s != "Unknown"])
+        
+        with col3:
+            selected_stores = st.multiselect(
+                "🏪 Select Stores",
+                options=stores,
+                default=stores,
+                key="store_filter"
+            )
+        
+        if selected_stores:
+            filtered_data = filtered_data[filtered_data["Store"].isin(selected_stores)]
+    
+    # Quick date presets
+    with col4:
+        preset = st.selectbox(
+            "⚡ Quick Select",
+            ["Custom Range", "Last 7 Days", "Last 30 Days", "This Month", "All Time"]
+        )
+        
+        if preset != "Custom Range" and data["Date"].notna().any():
+            today = datetime.now().date()
+            if preset == "Last 7 Days":
+                start_preset = today - timedelta(days=7)
+                filtered_data = data[data["Date"].dt.date >= start_preset]
+            elif preset == "Last 30 Days":
+                start_preset = today - timedelta(days=30)
+                filtered_data = data[data["Date"].dt.date >= start_preset]
+            elif preset == "This Month":
+                start_preset = today.replace(day=1)
+                filtered_data = data[data["Date"].dt.date >= start_preset]
+            else:  # All Time
+                filtered_data = data.copy()
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    # Calculate KPIs
+    kpis = AnalyticsEngine.calculate_kpis(filtered_data)
+    
+    # Beautiful Tab Navigation
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🏠 Dashboard Overview",
+        "📊 Advanced Analytics", 
+        "⭐ Product Intelligence",
+        "📥 Data & Export"
+    ])
+    
+    with tab1:
+        render_dashboard_overview(filtered_data, kpis)
+    
+    with tab2:
+        render_analytics_tab(filtered_data, kpis)
+    
+    with tab3:
+        render_products_tab(filtered_data)
+    
+    with tab4:
+        render_data_export_tab(filtered_data, column_mapping)
+    
+    # Beautiful footer
+    st.markdown("""
+    <div style="text-align: center; padding: 40px 0 20px 0; color: rgba(255,255,255,0.7);">
+        <p style="margin: 0; font-size: 0.9rem;">
+            🏪 Alkhair Family Market Dashboard • Built with ❤️ for Business Excellence
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        st.error(f"❌ Application Error: {str(e)}")
+        st.info("Please refresh the page or contact support if the issue persists.")
+        st.stop()
