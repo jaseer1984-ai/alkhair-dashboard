@@ -34,7 +34,7 @@ st.set_page_config(page_title=config.PAGE_TITLE, layout=config.LAYOUT, initial_s
 
 
 # =========================================
-# CSS (soft pills + light cards + tidy UI)
+# CSS (colored tabs + tidy UI)
 # =========================================
 def apply_css():
     st.markdown(
@@ -65,6 +65,42 @@ def apply_css():
         .pill.good      { background:#eff6ff; color:#2563eb; }
         .pill.warn      { background:#fffbeb; color:#d97706; }
         .pill.danger    { background:#fef2f2; color:#dc2626; }
+
+        /* Colored Tabs */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 8px;
+            border-bottom: none;
+        }
+        .stTabs [data-baseweb="tab"] {
+            border-radius: 10px 10px 0 0 !important;
+            padding: 10px 18px !important;
+            font-weight: 700 !important;
+            background: #f3f4f6 !important;
+            color: #374151 !important;
+            border: 1px solid #e5e7eb !important;
+            border-bottom: none !important;
+        }
+        .stTabs [data-baseweb="tab"]:hover {
+            background:#e5e7eb !important;
+        }
+        /* Active tab default (will be overridden by nth-child rules) */
+        .stTabs [aria-selected="true"] {
+            color: #fff !important;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        /* Color the active tab by order */
+        .stTabs [data-baseweb="tab"]:nth-child(1)[aria-selected="true"] {
+            background: linear-gradient(135deg,#ef4444 0%,#f87171 100%) !important;   /* red */
+            border-color:#f87171 !important;
+        }
+        .stTabs [data-baseweb="tab"]:nth-child(2)[aria-selected="true"] {
+            background: linear-gradient(135deg,#3b82f6 0%,#60a5fa 100%) !important;   /* blue */
+            border-color:#60a5fa !important;
+        }
+        .stTabs [data-baseweb="tab"]:nth-child(3)[aria-selected="true"] {
+            background: linear-gradient(135deg,#8b5cf6 0%,#a78bfa 100%) !important;   /* purple */
+            border-color:#a78bfa !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -224,7 +260,7 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
 
 
 # =========================================
-# CHARTS (daily model)
+# CHARTS
 # =========================================
 def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool = True) -> go.Figure:
     if df.empty or "Date" not in df.columns or df["Date"].isna().all():
@@ -409,9 +445,8 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
         st.plotly_chart(fig_cmp, use_container_width=True, config={"displayModeBar": False})
 
 
-# ============== NEW: Branch filter via toggle buttons ==============
+# -------- Branch filter via toggle buttons (no multiselect) --------
 def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> List[str]:
-    """Branch filter using toggle buttons (replaces multiselect)."""
     if "BranchName" not in df.columns:
         return []
 
@@ -430,8 +465,9 @@ def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> L
             st.session_state.selected_branches = []
             st.rerun()
 
+    # show buttons in a row
     with col_b:
-        btn_cols = st.columns(len(all_branches))
+        btn_cols = st.columns(len(all_branches)) if all_branches else []
         for i, b in enumerate(all_branches):
             is_on = b in st.session_state.selected_branches
             label = ("✅ " if is_on else "➕ ") + b
@@ -451,7 +487,7 @@ def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> L
 def main():
     apply_css()
 
-    # Sidebar (expander removed)
+    # Sidebar (no data-source expander)
     with st.sidebar:
         st.markdown(f"### 📊 {config.PAGE_TITLE}")
         st.caption("Filters affect all tabs.")
@@ -459,7 +495,7 @@ def main():
             load_workbook_from_gsheet.clear()
             st.rerun()
 
-    # Always use the default published URL (expander removed)
+    # Always use the default published URL
     sheets_map = load_workbook_from_gsheet(config.DEFAULT_PUBLISHED_URL)
     if not sheets_map:
         st.warning("No non-empty sheets found.")
@@ -520,7 +556,7 @@ def main():
         else:
             st.write("All metrics look healthy for the current selection.")
 
-    # Tabs
+    # Colored Tabs
     t1, t2, t3 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "📥 Export"])
     with t1:
         render_overview(df, k)
@@ -528,6 +564,7 @@ def main():
     with t2:
         st.markdown("#### Choose Metric")
         mtab1, mtab2, mtab3 = st.tabs(["💰 Sales", "🛍️ NOB", "💎 ABV"])
+        # time window control for trends
         if "Date" in df.columns and df["Date"].notna().any():
             opts = ["Last 7 Days", "Last 30 Days", "Last 3 Months", "All Time"]
             choice = st.selectbox("Time Period", opts, index=1, key="trend_window")
@@ -540,11 +577,14 @@ def main():
             f = df.copy()
 
         with mtab1:
-            st.plotly_chart(_metric_area(f, "SalesActual", "Daily Sales (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(_metric_area(f, "SalesActual", "Daily Sales (Actual vs Target)"),
+                            use_container_width=True, config={"displayModeBar": False})
         with mtab2:
-            st.plotly_chart(_metric_area(f, "NOBActual", "Number of Baskets (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(_metric_area(f, "NOBActual", "Number of Baskets (Actual vs Target)"),
+                            use_container_width=True, config={"displayModeBar": False})
         with mtab3:
-            st.plotly_chart(_metric_area(f, "ABVActual", "Average Basket Value (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(_metric_area(f, "ABVActual", "Average Basket Value (Actual vs Target)"),
+                            use_container_width=True, config={"displayModeBar": False})
 
     with t3:
         if df.empty:
