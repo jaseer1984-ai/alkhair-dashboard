@@ -17,7 +17,6 @@ import plotly.graph_objects as go
 class Config:
     PAGE_TITLE = "Al Khair Business Performance"
     LAYOUT = "wide"
-    # Default published URL (kept; can be replaced via the data-source expander)
     DEFAULT_PUBLISHED_URL = (
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vQG7boLWl2bNLCPR05NXv6EFpPPcFfXsiXPQ7rAGYr3q8Nkc2Ijg8BqEwVofcMLSg/pubhtml"
     )
@@ -66,26 +65,6 @@ def apply_css():
         .pill.good      { background:#eff6ff; color:#2563eb; }
         .pill.warn      { background:#fffbeb; color:#d97706; }
         .pill.danger    { background:#fef2f2; color:#dc2626; }
-
-        /* Multiselect chips — stronger overrides to stop red tags */
-        .stMultiSelect [data-baseweb="tag"],
-        div[data-baseweb="tag"],
-        .stMultiSelect [class*="tag"] {
-            background-color: #f9fafb !important;
-            color: #111827 !important;
-            border-radius: 12px !important;
-            padding: 4px 10px !important;
-            font-weight: 600 !important;
-            border: 1px solid #e5e7eb !important;
-            box-shadow: none !important;
-        }
-        .stMultiSelect [data-baseweb="tag"]:hover { background-color: #f0f9ff !important; border-color: #38bdf8 !important; }
-        .stMultiSelect [data-baseweb="tag"] svg { fill: #6b7280 !important; }
-        /* Input border softer */
-        .stMultiSelect [data-baseweb="select"] > div {
-            border-radius: 12px !important;
-            border-color: #e5e7eb !important;
-        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -121,17 +100,6 @@ def load_workbook_from_gsheet(published_url: str) -> Dict[str, pd.DataFrame]:
         if not df.empty:
             sheets[sn] = df
     return sheets
-
-
-def load_workbook_from_upload(file) -> Dict[str, pd.DataFrame]:
-    xls = pd.ExcelFile(file)
-    out = {}
-    for sn in xls.sheet_names:
-        df = xls.parse(sn)
-        df = df.dropna(how="all").dropna(axis=1, how="all")
-        if not df.empty:
-            out[sn] = df
-    return out
 
 
 def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -256,35 +224,17 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
 
 
 # =========================================
-# CHARTS (new daily model)
+# CHARTS (daily model)
 # =========================================
 def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool = True) -> go.Figure:
-    """
-    Render a daily area chart for the given metric. If show_target is True and a corresponding
-    target column exists (e.g. SalesTarget for SalesActual), a secondary line will be drawn
-    for the target values to facilitate comparison between actual and target.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Pre-filtered dataframe containing at least a Date, BranchName and the metric columns.
-    y_col : str
-        Column name for the actual metric values (e.g. 'SalesActual').
-    title : str
-        Plot title.
-    show_target : bool, optional
-        Whether to plot the target line if available. Defaults to True.
-    """
     if df.empty or "Date" not in df.columns or df["Date"].isna().all():
         return go.Figure()
 
-    # Determine aggregation function: ABVActual uses mean (average basket value), others use sum
     agg_func = "sum" if y_col != "ABVActual" else "mean"
     daily_actual = df.groupby(["Date", "BranchName"]).agg({y_col: agg_func}).reset_index()
     target_col_map = {"SalesActual": "SalesTarget", "NOBActual": "NOBTarget", "ABVActual": "ABVTarget"}
     target_col = target_col_map.get(y_col)
 
-    # Prepare target data if requested and available
     daily_target: Optional[pd.DataFrame] = None
     if show_target and target_col and target_col in df.columns:
         agg_func_target = "sum" if y_col != "ABVActual" else "mean"
@@ -295,7 +245,6 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool 
     for i, br in enumerate(sorted(daily_actual["BranchName"].unique())):
         d_actual = daily_actual[daily_actual["BranchName"] == br]
         color = palette[i % len(palette)]
-        # Plot actual values as filled area
         fig.add_trace(
             go.Scatter(
                 x=d_actual["Date"],
@@ -307,7 +256,6 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool 
                 hovertemplate=f"<b>{br}</b><br>Date: %{{x|%Y-%m-%d}}<br>Actual: %{{y:,.0f}}<extra></extra>",
             )
         )
-        # Plot target line if available
         if daily_target is not None:
             d_target = daily_target[daily_target["BranchName"] == br]
             fig.add_trace(
@@ -336,34 +284,15 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool 
 
 
 def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
-    """
-    Create a grouped bar chart comparing Sales %, NOB %, and ABV % across branches.
-
-    Parameters
-    ----------
-    bp : pd.DataFrame
-        Branch performance summary indexed by BranchName with percent columns.
-    """
     if bp.empty:
         return go.Figure()
-    metrics = {
-        "SalesPercent": "Sales %",
-        "NOBPercent": "NOB %",
-        "ABVPercent": "ABV %",
-    }
+    metrics = {"SalesPercent": "Sales %", "NOBPercent": "NOB %", "ABVPercent": "ABV %"}
     fig = go.Figure()
     x = bp.index.tolist()
     palette = ["#3b82f6", "#10b981", "#f59e0b"]
     for i, (col, label) in enumerate(metrics.items()):
         y = bp[col].tolist()
-        fig.add_trace(
-            go.Bar(
-                x=x,
-                y=y,
-                name=label,
-                marker=dict(color=palette[i % len(palette)]),
-            )
-        )
+        fig.add_trace(go.Bar(x=x, y=y, name=label, marker=dict(color=palette[i % len(palette)])))
     fig.update_layout(
         barmode="group",
         title="Branch Performance Comparison (%)",
@@ -378,7 +307,7 @@ def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
 
 
 # =========================================
-# RENDER
+# RENDER HELPERS
 # =========================================
 def branch_status_class(pct: float) -> str:
     if pct >= 95:
@@ -402,7 +331,6 @@ def render_branch_cards(bp: pd.DataFrame):
     if bp.empty:
         st.info("No branch summary available.")
         return
-    # 2 rows of light cards (auto wrap)
     cols_per_row = 3
     items = list(bp.index)
     for i in range(0, len(items), cols_per_row):
@@ -412,7 +340,6 @@ def render_branch_cards(bp: pd.DataFrame):
                 r = bp.loc[br]
                 avg_pct = float(np.nanmean([r.get("SalesPercent", 0), r.get("NOBPercent", 0), r.get("ABVPercent", 0)]) or 0)
                 cls = branch_status_class(avg_pct)
-                # ultra-light tint based on branch color (alpha ~ 10%)
                 color = _branch_color_by_name(br)
                 st.markdown(
                     f"""
@@ -449,7 +376,6 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
     if "branch_performance" in k and not k["branch_performance"].empty:
         render_branch_cards(k["branch_performance"])
 
-    # Comparison (table only; chart removed here to keep the layout clean)
     if "branch_performance" in k and not k["branch_performance"].empty:
         st.markdown("### 📊 Comparison Table")
         bp = k["branch_performance"].copy()
@@ -467,10 +393,45 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
             .round(1),
             use_container_width=True,
         )
-        # New chart: branch performance comparison bar chart
         st.markdown("### 📉 Branch Performance Comparison")
         fig_cmp = _branch_comparison_chart(bp)
         st.plotly_chart(fig_cmp, use_container_width=True, config={"displayModeBar": False})
+
+
+# ============== NEW: Branch filter via toggle buttons ==============
+def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> List[str]:
+    """Branch filter using toggle buttons (replaces multiselect)."""
+    if "BranchName" not in df.columns:
+        return []
+
+    all_branches = sorted([b for b in df["BranchName"].dropna().unique()])
+    if "selected_branches" not in st.session_state:
+        st.session_state.selected_branches = all_branches.copy()
+
+    st.markdown("### 🏪 Branches")
+    col_a, col_b = st.columns([1, 6])
+    with col_a:
+        c1, c2 = st.columns(2)
+        if c1.button("Select all"):
+            st.session_state.selected_branches = all_branches.copy()
+            st.rerun()
+        if c2.button("Clear"):
+            st.session_state.selected_branches = []
+            st.rerun()
+
+    with col_b:
+        btn_cols = st.columns(len(all_branches))
+        for i, b in enumerate(all_branches):
+            is_on = b in st.session_state.selected_branches
+            label = ("✅ " if is_on else "➕ ") + b
+            if btn_cols[i].button(label, key=f"{key_prefix}{i}"):
+                if is_on:
+                    st.session_state.selected_branches.remove(b)
+                else:
+                    st.session_state.selected_branches.append(b)
+                st.rerun()
+
+    return st.session_state.selected_branches
 
 
 # =========================================
@@ -479,27 +440,16 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
 def main():
     apply_css()
 
-    # ----- Sidebar (no "Advanced" checkbox)
+    # Sidebar (expander removed)
     with st.sidebar:
         st.markdown(f"### 📊 {config.PAGE_TITLE}")
         st.caption("Filters affect all tabs.")
+        if st.button("🔄 Refresh data"):
+            load_workbook_from_gsheet.clear()
+            st.rerun()
 
-        # Small expander for data source (kept minimal and closed by default)
-        with st.expander("Data source (optional)", expanded=False):
-            url = st.text_input("Published Google Sheets URL", value=config.DEFAULT_PUBLISHED_URL, help="Paste a 'Publish to web' URL.")
-            uploaded_file = st.file_uploader("Or upload Excel", type=["xlsx", "xls"])
-            if st.button("🔄 Refresh data"):
-                load_workbook_from_gsheet.clear()
-                st.rerun()
-
-    # Load data (prefer upload if provided)
-    if 'uploaded_file' in locals() and uploaded_file is not None:
-        sheets_map = load_workbook_from_upload(uploaded_file)
-    else:
-        # If user never opened expander, url won't exist in locals; use default
-        url = locals().get("url", config.DEFAULT_PUBLISHED_URL)
-        sheets_map = load_workbook_from_gsheet(url)
-
+    # Always use the default published URL (expander removed)
+    sheets_map = load_workbook_from_gsheet(config.DEFAULT_PUBLISHED_URL)
     if not sheets_map:
         st.warning("No non-empty sheets found.")
         st.stop()
@@ -509,25 +459,25 @@ def main():
         st.error("Could not process data. Check column names and sheet structure.")
         st.stop()
 
-    # Clean header (no success banner)
     st.markdown(f"<div class='title'>📊 {config.PAGE_TITLE}</div>", unsafe_allow_html=True)
     date_span = ""
     if "Date" in df.columns and df["Date"].notna().any():
         date_span = f"{df['Date'].min().date()} → {df['Date'].max().date()}"
-    st.markdown(f"<div class='subtitle'>Branches: {df['BranchName'].nunique() if 'BranchName' in df else 0} • Rows: {len(df):,} {('• ' + date_span) if date_span else ''}</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='subtitle'>Branches: {df['BranchName'].nunique() if 'BranchName' in df else 0} • Rows: {len(df):,} {('• ' + date_span) if date_span else ''}</div>",
+        unsafe_allow_html=True,
+    )
 
-    # Branch filter (soft pills)
+    # Branch filter (toggle buttons)
     if "BranchName" in df.columns:
-        with st.sidebar:
-            all_branches = sorted([b for b in df["BranchName"].dropna().unique()])
-            selected = st.multiselect("Filter Branches", options=all_branches, default=all_branches)
+        selected = render_branch_filter_buttons(df)
         if selected:
             df = df[df["BranchName"].isin(selected)].copy()
         if df.empty:
             st.warning("No rows after branch filter.")
             st.stop()
 
-    # Date filter (main)
+    # Date filter
     if "Date" in df.columns and df["Date"].notna().any():
         c1, c2, _ = st.columns([2, 2, 6])
         with c1:
@@ -567,7 +517,6 @@ def main():
     with t2:
         st.markdown("#### Choose Metric")
         mtab1, mtab2, mtab3 = st.tabs(["💰 Sales", "🛍️ NOB", "💎 ABV"])
-        # Time window controls for trends
         if "Date" in df.columns and df["Date"].notna().any():
             opts = ["Last 7 Days", "Last 30 Days", "Last 3 Months", "All Time"]
             choice = st.selectbox("Time Period", opts, index=1, key="trend_window")
