@@ -1,5 +1,5 @@
-# app.py — Enhanced Alkhair Family Market Dashboard with Tabbed Interface
-# Organized into separate tabs for better user experience
+# app.py — Enhanced Alkhair Family Market Dashboard with Multiple Data Sources
+# Supports multiple Google Sheets and Excel files for comprehensive reporting
 
 import io
 import re
@@ -14,6 +14,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.express as px
 
 # =========================
 # CONFIGURATION
@@ -24,27 +25,38 @@ class Config:
     PAGE_TITLE = "Alkhair Family Market — Executive Dashboard"
     LAYOUT = "wide"
     REFRESH_MINUTES = 1
-    GSHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSW_ui1m_393ipZv8NAliu1rly6zeifFxMfOWpQF17hjVIDa9Ll8PiGCaz8gTRkMQ/pub?output=csv"
+    
+    # Multiple data sources
+    DATA_SOURCES = {
+        "primary": "https://docs.google.com/spreadsheets/d/e/2PACX-1vSW_ui1m_393ipZv8NAliu1rly6zeifFxMfOWpQF17hjVIDa9Ll8PiGCaz8gTRkMQ/pub?output=csv",
+        "dsr_report": "https://docs.google.com/spreadsheets/d/e/2PACX-1vS2Nyi0iNbPJAvwkshvYsglPgSF76MDS51EbSuB8Wef3OA8oQc18xP6xLpe6-sNYQ/pub?output=csv"
+    }
     
     # Enhanced column aliases for comprehensive data mapping
     COLUMN_MAPPINGS = {
-        "Date": ["date", "bill_date", "txn_date", "invoice_date", "posting_date"],
-        "Store": ["store", "branch", "location", "shop"],
-        "Sales": ["sales", "amount", "net_sales", "revenue", "netamount", "net_amount", "actual_sales"],
-        "TargetSales": ["target_sales", "target", "sales_target", "budget_sales", "planned_sales"],
-        "COGS": ["cogs", "cost", "purchase_cost", "cost_of_goods"],
-        "Qty": ["qty", "quantity", "qty_sold", "quantity_sold", "units", "pcs", "pieces", "units_sold", "qnty", "qnt", "qty."],
-        "Tickets": ["tickets", "bills", "invoice_count", "transactions", "bills_count", "baskets", "no_of_baskets"],
-        "Category": ["category", "cat"],
-        "Item": ["item", "product", "sku", "item_name"],
+        "Date": ["date", "bill_date", "txn_date", "invoice_date", "posting_date", "transaction_date", "sale_date"],
+        "Store": ["store", "branch", "location", "shop", "outlet", "store_name"],
+        "Sales": ["sales", "amount", "net_sales", "revenue", "netamount", "net_amount", "actual_sales", "sale_amount", "total_sales"],
+        "TargetSales": ["target_sales", "target", "sales_target", "budget_sales", "planned_sales", "target_amount"],
+        "COGS": ["cogs", "cost", "purchase_cost", "cost_of_goods", "cost_of_sales"],
+        "Qty": ["qty", "quantity", "qty_sold", "quantity_sold", "units", "pcs", "pieces", "units_sold", "qnty", "qnt", "qty.", "total_qty"],
+        "Tickets": ["tickets", "bills", "invoice_count", "transactions", "bills_count", "baskets", "no_of_baskets", "bill_count"],
+        "Category": ["category", "cat", "product_category", "item_category"],
+        "Item": ["item", "product", "sku", "item_name", "product_name", "description"],
         "InventoryQty": ["inventoryqty", "inventory_qty", "stock_qty", "stockqty", "stock_quantity"],
         "InventoryValue": ["inventoryvalue", "inventory_value", "stock_value", "stockvalue"],
         "BankBalance": ["bank_balance", "bank", "bank_amount", "bankbalance", "account_balance"],
         "CashBalance": ["cash_balance", "cash", "cash_amount", "cashbalance", "petty_cash"],
-        "Expenses": ["expenses", "operating_expenses", "opex", "costs", "expenditure"],
-        "CustomerCount": ["customer_count", "customers", "footfall", "visitors"],
-        "Supplier": ["supplier", "vendor", "supplier_name"],
-        "PaymentMethod": ["payment_method", "payment_type", "payment"]
+        "Expenses": ["expenses", "operating_expenses", "opex", "costs", "expenditure", "expense_amount"],
+        "CustomerCount": ["customer_count", "customers", "footfall", "visitors", "customer_visits"],
+        "Supplier": ["supplier", "vendor", "supplier_name", "vendor_name"],
+        "PaymentMethod": ["payment_method", "payment_type", "payment", "pay_method"],
+        "Employee": ["employee", "staff", "cashier", "user", "operator"],
+        "Discount": ["discount", "discount_amount", "discount_value", "promo"],
+        "Tax": ["tax", "vat", "tax_amount", "sales_tax"],
+        "Profit": ["profit", "net_profit", "gross_profit", "margin_amount"],
+        "UnitPrice": ["unit_price", "price", "rate", "selling_price", "sp"],
+        "UnitCost": ["unit_cost", "cost_price", "cp", "purchase_price"]
     }
     
     # Enhanced KPI colors for tiles
@@ -58,14 +70,19 @@ class Config:
         "cash": "#fce7f3",
         "target": "#f3e8ff",
         "liquidity": "#ddd6fe",
-        "variance": "#fef3c7"
+        "variance": "#fef3c7",
+        "growth": "#bbf7d0",
+        "margin": "#fecaca",
+        "customer": "#e0e7ff"
     }
     
     # Target thresholds for performance indicators
     TARGET_THRESHOLDS = {
         "conversion_rate": 2.5,  # Target conversion rate %
         "gross_margin": 30.0,    # Target gross margin %
-        "liquidity_ratio": 2.0   # Target liquidity ratio
+        "liquidity_ratio": 2.0,  # Target liquidity ratio
+        "growth_rate": 5.0,      # Target growth rate %
+        "customer_retention": 80.0  # Target customer retention %
     }
 
 # Initialize configuration
@@ -127,6 +144,17 @@ def apply_custom_css():
         border-bottom: 1px solid var(--border);
         color: white;
         border-radius: 12px;
+    }
+    
+    .data-source-indicator {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 8px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        margin-left: 8px;
+        background: rgba(255, 255, 255, 0.2);
+        color: white;
     }
     
     .kpi-tile {
@@ -211,6 +239,41 @@ def apply_custom_css():
     }
     
     [data-testid='stSidebar'] { display: none !important; }
+    
+    .data-source-card {
+        background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        border: 2px solid #cbd5e1;
+        border-radius: 12px;
+        padding: 16px;
+        margin: 8px 0;
+    }
+    
+    .alert-info {
+        background: #dbeafe;
+        border: 1px solid #3b82f6;
+        border-radius: 8px;
+        padding: 12px;
+        color: #1e40af;
+        margin: 8px 0;
+    }
+    
+    .alert-success {
+        background: #dcfce7;
+        border: 1px solid #22c55e;
+        border-radius: 8px;
+        padding: 12px;
+        color: #166534;
+        margin: 8px 0;
+    }
+    
+    .alert-warning {
+        background: #fef3c7;
+        border: 1px solid #f59e0b;
+        border-radius: 8px;
+        padding: 12px;
+        color: #92400e;
+        margin: 8px 0;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -282,6 +345,45 @@ class DataProcessor:
         return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
     
     @classmethod
+    def load_multiple_sources(cls, sources: Dict[str, str]) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+        """Load and combine data from multiple sources"""
+        combined_data = pd.DataFrame()
+        source_info = {}
+        
+        for source_name, url in sources.items():
+            try:
+                csv_url = cls.convert_gsheet_url(url)
+                df = pd.read_csv(csv_url)
+                
+                # Add source identifier
+                df['DataSource'] = source_name
+                
+                # Store source info
+                source_info[source_name] = {
+                    'url': url,
+                    'rows': len(df),
+                    'columns': list(df.columns),
+                    'status': 'success'
+                }
+                
+                # Append to combined data
+                if combined_data.empty:
+                    combined_data = df.copy()
+                else:
+                    combined_data = pd.concat([combined_data, df], ignore_index=True, sort=False)
+                    
+            except Exception as e:
+                source_info[source_name] = {
+                    'url': url,
+                    'rows': 0,
+                    'columns': [],
+                    'status': 'error',
+                    'error': str(e)
+                }
+        
+        return combined_data, source_info
+    
+    @classmethod
     def standardize_dataframe(cls, df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, str]]:
         """Standardize column names and data types"""
         if df.empty:
@@ -302,7 +404,8 @@ class DataProcessor:
                 if target_col == "Date":
                     df[target_col] = pd.to_datetime(df[target_col], errors='coerce', dayfirst=True)
                 elif target_col in ["Sales", "TargetSales", "COGS", "Qty", "Tickets", "InventoryQty", 
-                                  "InventoryValue", "BankBalance", "CashBalance", "Expenses", "CustomerCount"]:
+                                  "InventoryValue", "BankBalance", "CashBalance", "Expenses", "CustomerCount",
+                                  "Discount", "Tax", "Profit", "UnitPrice", "UnitCost"]:
                     df[target_col] = df[target_col].apply(cls.clean_numeric)
                     if target_col in ["Sales", "Qty"]:
                         df[target_col] = df[target_col].fillna(0)
@@ -338,6 +441,12 @@ class DataProcessor:
         else:
             df["TotalLiquidity"] = np.nan
             df["LiquidityRatio"] = np.nan
+        
+        # Calculate unit-level metrics
+        if df["UnitPrice"].notna().any() and df["UnitCost"].notna().any():
+            df["UnitMargin"] = df["UnitPrice"] - df["UnitCost"]
+            df["UnitMarginPct"] = np.where(df["UnitPrice"] > 0, 
+                                         (df["UnitMargin"] / df["UnitPrice"]) * 100, 0)
         
         # Clean store names
         df["Store"] = df["Store"].fillna("").astype(str).str.strip()
@@ -380,6 +489,11 @@ class AnalyticsEngine:
             kpis["gross_profit"] = 0
             kpis["gross_margin"] = 0
         
+        # Discount and Tax KPIs
+        kpis["total_discount"] = float(df["Discount"].sum()) if df["Discount"].notna().any() else 0
+        kpis["total_tax"] = float(df["Tax"].sum()) if df["Tax"].notna().any() else 0
+        kpis["discount_rate"] = (kpis["total_discount"] / kpis["total_sales"] * 100) if kpis["total_sales"] > 0 else 0
+        
         # Liquidity KPIs
         kpis["bank_balance"] = float(df["BankBalance"].iloc[-1]) if df["BankBalance"].notna().any() else 0
         kpis["cash_balance"] = float(df["CashBalance"].iloc[-1]) if df["CashBalance"].notna().any() else 0
@@ -401,10 +515,10 @@ class AnalyticsEngine:
             kpis["avg_daily_sales"] = 0
             kpis["avg_daily_tickets"] = 0
         
-        # Inventory metrics
-        if df["InventoryValue"].notna().any():
-            kpis["inventory_value"] = float(df["InventoryValue"].sum())
-            kpis["inventory_turnover"] = kpis["total_sales"] / kpis["inventory_value"] if kpis.get("inventory_value", 0) > 0 else 0
+        # Data source metrics
+        if "DataSource" in df.columns:
+            kpis["data_sources"] = df["DataSource"].nunique()
+            kpis["source_breakdown"] = df.groupby("DataSource")["Sales"].sum().to_dict()
         
         # Performance indicators
         kpis["performance_score"] = AnalyticsEngine.calculate_performance_score(kpis)
@@ -463,6 +577,10 @@ class AnalyticsEngine:
         else:
             insights.append(f"⚠️ Performance needs improvement: **{performance:.1f}/100**")
         
+        # Data source insights
+        if kpis.get("data_sources", 0) > 1:
+            insights.append(f"📊 Data integrated from **{kpis['data_sources']} sources** for comprehensive analysis")
+        
         # Sales target analysis
         if kpis.get("target_sales", 0) > 0:
             variance_pct = kpis.get("sales_variance_pct", 0)
@@ -488,6 +606,13 @@ class AnalyticsEngine:
                 insights.append(f"💛 Moderate liquidity: **SAR {liquidity:,.0f}**")
             else:
                 insights.append(f"🔴 Low liquidity warning: **SAR {liquidity:,.0f}**")
+        
+        # Discount analysis
+        if kpis.get("discount_rate", 0) > 0:
+            if kpis["discount_rate"] > 10:
+                insights.append(f"⚠️ High discount rate: **{kpis['discount_rate']:.1f}%** - monitor profitability")
+            else:
+                insights.append(f"🎯 Controlled discount rate: **{kpis['discount_rate']:.1f}%**")
         
         # Basket size analysis
         avg_basket = kpis.get("avg_basket", 0)
@@ -558,6 +683,102 @@ class VisualizationEngine:
         )
         
         return fig
+    
+    @staticmethod
+    def create_data_source_comparison(df: pd.DataFrame) -> go.Figure:
+        """Create comparison chart showing data from different sources"""
+        if "DataSource" not in df.columns:
+            return go.Figure()
+        
+        source_comparison = df.groupby(["DataSource", df["Date"].dt.date]).agg({
+            "Sales": "sum"
+        }).reset_index()
+        
+        fig = go.Figure()
+        
+        colors = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6"]
+        
+        for i, source in enumerate(source_comparison["DataSource"].unique()):
+            source_data = source_comparison[source_comparison["DataSource"] == source]
+            
+            fig.add_trace(go.Scatter(
+                x=source_data["Date"],
+                y=source_data["Sales"],
+                name=f"Source: {source.title()}",
+                mode="lines+markers",
+                line=dict(color=colors[i % len(colors)], width=3),
+                marker=dict(size=8)
+            ))
+        
+        fig.update_layout(
+            title="Sales Comparison by Data Source",
+            xaxis_title="Date",
+            yaxis_title="Sales (SAR)",
+            plot_bgcolor="#ffffff",
+            paper_bgcolor="#ffffff",
+            height=400
+        )
+        
+        return fig
+    
+    @staticmethod
+    def create_comprehensive_performance_chart(df: pd.DataFrame) -> go.Figure:
+        """Create a comprehensive performance chart with multiple metrics"""
+        if df["Date"].notna().any():
+            daily_metrics = df.groupby(df["Date"].dt.date).agg({
+                "Sales": "sum",
+                "Qty": "sum",
+                "Tickets": "sum",
+                "GrossProfit": "sum",
+                "Discount": "sum"
+            }).reset_index()
+            
+            # Create subplots
+            fig = make_subplots(
+                rows=2, cols=2,
+                subplot_titles=('Daily Sales', 'Quantity Sold', 'Gross Profit', 'Discount Given'),
+                specs=[[{"secondary_y": False}, {"secondary_y": False}],
+                       [{"secondary_y": False}, {"secondary_y": False}]]
+            )
+            
+            # Sales
+            fig.add_trace(
+                go.Bar(x=daily_metrics["Date"], y=daily_metrics["Sales"], 
+                      name="Sales", marker_color="#3b82f6"),
+                row=1, col=1
+            )
+            
+            # Quantity
+            fig.add_trace(
+                go.Scatter(x=daily_metrics["Date"], y=daily_metrics["Qty"], 
+                          name="Quantity", line=dict(color="#22c55e", width=3)),
+                row=1, col=2
+            )
+            
+            # Gross Profit
+            fig.add_trace(
+                go.Bar(x=daily_metrics["Date"], y=daily_metrics["GrossProfit"], 
+                      name="Gross Profit", marker_color="#f59e0b"),
+                row=2, col=1
+            )
+            
+            # Discount
+            fig.add_trace(
+                go.Bar(x=daily_metrics["Date"], y=daily_metrics["Discount"], 
+                      name="Discount", marker_color="#ef4444"),
+                row=2, col=2
+            )
+            
+            fig.update_layout(
+                height=600,
+                showlegend=False,
+                plot_bgcolor="#ffffff",
+                paper_bgcolor="#ffffff"
+            )
+            
+            return fig
+        
+        return go.Figure()
     
     @staticmethod
     def create_liquidity_chart(df: pd.DataFrame) -> go.Figure:
@@ -650,9 +871,78 @@ class VisualizationEngine:
 # =========================
 # TAB CONTENT FUNCTIONS
 # =========================
+def render_data_sources_tab(source_info: Dict[str, Any], filtered_data: pd.DataFrame):
+    """Render the Data Sources tab content"""
+    st.markdown("## 📊 Data Sources Management")
+    
+    # Data source status overview
+    col1, col2, col3, col4 = st.columns(4)
+    
+    total_sources = len(source_info)
+    successful_sources = sum(1 for info in source_info.values() if info['status'] == 'success')
+    total_rows = sum(info.get('rows', 0) for info in source_info.values())
+    
+    with col1:
+        st.metric("Total Sources", total_sources)
+    with col2:
+        st.metric("Active Sources", successful_sources)
+    with col3:
+        st.metric("Total Records", f"{total_rows:,}")
+    with col4:
+        coverage = (successful_sources / total_sources * 100) if total_sources > 0 else 0
+        st.metric("Coverage", f"{coverage:.0f}%")
+    
+    # Individual source status
+    st.markdown("### 🔗 Source Details")
+    
+    for source_name, info in source_info.items():
+        status_color = "#dcfce7" if info['status'] == 'success' else "#fee2e2"
+        status_icon = "✅" if info['status'] == 'success' else "❌"
+        
+        st.markdown(f"""
+        <div class="data-source-card" style="background:{status_color};">
+            <h4>{status_icon} {source_name.title()} Report</h4>
+            <p><strong>Status:</strong> {info['status'].title()}</p>
+            <p><strong>Records:</strong> {info['rows']:,}</p>
+            <p><strong>Columns:</strong> {len(info['columns'])}</p>
+            {f"<p><strong>Error:</strong> {info['error']}</p>" if info['status'] == 'error' else ""}
+            <p><strong>URL:</strong> <code>{info['url'][:80]}...</code></p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Data source comparison visualization
+    if "DataSource" in filtered_data.columns and filtered_data["DataSource"].nunique() > 1:
+        st.markdown("### 📈 Source Performance Comparison")
+        
+        source_chart = VisualizationEngine.create_data_source_comparison(filtered_data)
+        st.plotly_chart(source_chart, use_container_width=True)
+        
+        # Source breakdown table
+        source_breakdown = filtered_data.groupby("DataSource").agg({
+            "Sales": "sum",
+            "Qty": "sum",
+            "Tickets": "sum",
+            "Date": ["min", "max"]
+        }).round(2)
+        
+        source_breakdown.columns = ["Total Sales", "Total Qty", "Total Tickets", "Start Date", "End Date"]
+        source_breakdown = source_breakdown.reset_index()
+        
+        st.markdown("### 📊 Source Summary")
+        st.dataframe(source_breakdown, use_container_width=True)
+
 def render_overview_tab(filtered_data: pd.DataFrame, kpis: Dict[str, Any]):
     """Render the Overview tab content"""
     st.markdown("## 📊 Executive Overview")
+    
+    # Data sources indicator
+    if kpis.get("data_sources", 0) > 1:
+        st.markdown(f"""
+        <div class="alert-info">
+            📊 <strong>Multi-Source Analytics:</strong> This dashboard integrates data from 
+            {kpis['data_sources']} different sources for comprehensive business insights.
+        </div>
+        """, unsafe_allow_html=True)
     
     # Primary KPIs Row 1
     st.markdown("### Financial Performance")
@@ -675,18 +965,18 @@ def render_overview_tab(filtered_data: pd.DataFrame, kpis: Dict[str, Any]):
         """, unsafe_allow_html=True)
     
     # Secondary KPIs Row 2
-    st.markdown("### Liquidity & Operations")
+    st.markdown("### Operations & Customer Metrics")
     kpi_row2 = [
-        ("🏦 Bank Balance", f"SAR {kpis['bank_balance']:,.0f}", config.KPI_COLORS["bank"]),
-        ("💵 Cash Balance", f"SAR {kpis['cash_balance']:,.0f}", config.KPI_COLORS["cash"]),
-        ("💧 Total Liquidity", f"SAR {kpis['total_liquidity']:,.0f}", config.KPI_COLORS["liquidity"]),
         ("🛍️ Total Baskets", f"{kpis['total_baskets']:,.0f}", config.KPI_COLORS["tickets"]),
-        ("🎯 Conversion Rate", f"{kpis['conversion_rate']:.1f}%", config.KPI_COLORS["conversion"])
+        ("🎯 Avg Basket", f"SAR {kpis['avg_basket']:.2f}", config.KPI_COLORS["avg_sales"]),
+        ("💳 Discount Rate", f"{kpis['discount_rate']:.1f}%", config.KPI_COLORS["variance"]),
+        ("👥 Total Customers", f"{kpis['customer_count']:,.0f}", config.KPI_COLORS["customer"]),
+        ("🔄 Conversion Rate", f"{kpis['conversion_rate']:.1f}%", config.KPI_COLORS["conversion"])
     ]
     
     cols = st.columns(len(kpi_row2))
     for (label, value, color), col in zip(kpi_row2, cols):
-        # Add performance indicator
+        # Add performance indicator for conversion rate
         indicator_class = ""
         indicator_symbol = ""
         if "Conversion Rate" in label:
@@ -711,29 +1001,30 @@ def render_overview_tab(filtered_data: pd.DataFrame, kpis: Dict[str, Any]):
         </div>
         """, unsafe_allow_html=True)
     
-    # Performance Summary
-    col1, col2, col3 = st.columns([1, 1, 1])
+    # Liquidity Row
+    st.markdown("### Liquidity Position")
+    kpi_row3 = [
+        ("🏦 Bank Balance", f"SAR {kpis['bank_balance']:,.0f}", config.KPI_COLORS["bank"]),
+        ("💵 Cash Balance", f"SAR {kpis['cash_balance']:,.0f}", config.KPI_COLORS["cash"]),
+        ("💧 Total Liquidity", f"SAR {kpis['total_liquidity']:,.0f}", config.KPI_COLORS["liquidity"]),
+        ("📊 Performance Score", f"{kpis['performance_score']:.0f}/100", config.KPI_COLORS["target"]),
+        ("📅 Days Analyzed", f"{kpis['days_count']}", config.KPI_COLORS["conversion"])
+    ]
     
-    with col1:
-        st.metric(
-            label="Performance Score",
-            value=f"{kpis['performance_score']:.0f}/100",
-            delta=f"Target: 70+"
-        )
+    cols = st.columns(len(kpi_row3))
+    for (label, value, color), col in zip(kpi_row3, cols):
+        col.markdown(f"""
+        <div class="kpi-tile" style="background:{color}">
+            <div style="font-size:13px; color:#334155; font-weight:700;">{label}</div>
+            <div style="font-size:24px; line-height:1; margin-top:4px; color:#0f172a;">{value}</div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    with col2:
-        st.metric(
-            label="Avg Daily Sales",
-            value=f"SAR {kpis['avg_daily_sales']:,.0f}",
-            delta=f"Over {kpis['days_count']} days"
-        )
-    
-    with col3:
-        st.metric(
-            label="Avg Basket Size",
-            value=f"SAR {kpis['avg_basket']:.2f}",
-            delta=f"From {kpis['total_baskets']:,.0f} baskets"
-        )
+    # Comprehensive performance chart
+    if filtered_data["Date"].notna().any():
+        st.markdown("### 📈 Comprehensive Performance Overview")
+        perf_chart = VisualizationEngine.create_comprehensive_performance_chart(filtered_data)
+        st.plotly_chart(perf_chart, use_container_width=True)
 
 def render_financial_tab(filtered_data: pd.DataFrame, kpis: Dict[str, Any]):
     """Render the Financial Analytics tab content"""
@@ -751,7 +1042,7 @@ def render_financial_tab(filtered_data: pd.DataFrame, kpis: Dict[str, Any]):
             st.plotly_chart(liquidity_chart, use_container_width=True)
         
         # Financial metrics table
-        st.markdown("### 📊 Financial Summary")
+        st.markdown("### 📊 Comprehensive Financial Summary")
         
         financial_metrics = {
             "Revenue": f"SAR {kpis['actual_sales']:,.0f}",
@@ -759,268 +1050,257 @@ def render_financial_tab(filtered_data: pd.DataFrame, kpis: Dict[str, Any]):
             "Variance": f"SAR {kpis['sales_variance']:,.0f} ({kpis['sales_variance_pct']:+.1f}%)",
             "Gross Profit": f"SAR {kpis['gross_profit']:,.0f}",
             "Gross Margin": f"{kpis['gross_margin']:.1f}%",
+            "Total Discounts": f"SAR {kpis['total_discount']:,.0f}",
+            "Discount Rate": f"{kpis['discount_rate']:.1f}%",
+            "Total Tax": f"SAR {kpis['total_tax']:,.0f}",
             "Bank Balance": f"SAR {kpis['bank_balance']:,.0f}",
             "Cash Balance": f"SAR {kpis['cash_balance']:,.0f}",
-            "Total Liquidity": f"SAR {kpis['total_liquidity']:,.0f}"
+            "Total Liquidity": f"SAR {kpis['total_liquidity']:,.0f}",
+            "Avg Daily Sales": f"SAR {kpis['avg_daily_sales']:,.0f}"
         }
         
-        financial_df = pd.DataFrame(list(financial_metrics.items()), columns=['Metric', 'Value'])
-        st.dataframe(financial_df, use_container_width=True, hide_index=True)
+        # Create two-column layout for metrics
+        col1, col2 = st.columns(2)
+        
+        metrics_items = list(financial_metrics.items())
+        mid_point = len(metrics_items) // 2
+        
+        with col1:
+            for metric, value in metrics_items[:mid_point]:
+                st.metric(label=metric, value=value)
+        
+        with col2:
+            for metric, value in metrics_items[mid_point:]:
+                st.metric(label=metric, value=value)
 
 def render_sales_tab(filtered_data: pd.DataFrame, kpis: Dict[str, Any]):
     """Render the Sales Performance tab content"""
-    st.markdown("## 📈 Sales Performance")
+    st.markdown("## 📈 Sales Performance Analysis")
     
     if filtered_data["Date"].notna().any():
-        # Month selector
-        months = sorted(filtered_data["Date"].dt.to_period("M").unique())
-        month_strings = [m.strftime("%Y-%m") for m in months]
+        # Enhanced time period selector
+        time_periods = ["Last 7 Days", "Last 30 Days", "Current Month", "All Time"]
+        selected_period = st.selectbox("Time Period", options=time_periods, index=2)
         
-        selected_month = st.selectbox(
-            "Select Month for Analysis",
-            options=month_strings,
-            index=len(month_strings)-1 if month_strings else 0
-        )
-        
-        # Filter for selected month
-        if selected_month:
-            year, month = map(int, selected_month.split("-"))
-            month_data = filtered_data[
-                (filtered_data["Date"].dt.year == year) & 
-                (filtered_data["Date"].dt.month == month)
-            ]
+        # Filter based on selected period
+        today = datetime.now().date()
+        if selected_period == "Last 7 Days":
+            start_date = today - timedelta(days=7)
+            period_data = filtered_data[filtered_data["Date"].dt.date >= start_date]
+        elif selected_period == "Last 30 Days":
+            start_date = today - timedelta(days=30)
+            period_data = filtered_data[filtered_data["Date"].dt.date >= start_date]
+        elif selected_period == "Current Month":
+            start_date = today.replace(day=1)
+            period_data = filtered_data[filtered_data["Date"].dt.date >= start_date]
         else:
-            month_data = filtered_data.copy()
+            period_data = filtered_data.copy()
         
-        # Prepare daily data
-        if not month_data.empty:
-            month_data["Day"] = month_data["Date"].dt.date
-            daily_agg = month_data.groupby("Day").agg({
+        if not period_data.empty:
+            # Daily trend analysis
+            daily_analysis = period_data.groupby(period_data["Date"].dt.date).agg({
                 "Sales": "sum",
                 "Qty": "sum",
-                "Tickets": "sum"
+                "Tickets": "sum",
+                "GrossProfit": "sum"
             }).reset_index()
-            daily_agg["Conv"] = np.where(
-                daily_agg["Tickets"] > 0,
-                daily_agg["Qty"] / daily_agg["Tickets"] * 100,
-                0
-            )
-        else:
-            daily_agg = pd.DataFrame(columns=["Day", "Sales", "Qty", "Tickets", "Conv"])
-        
-        # Visualizations
-        col1, col2 = st.columns([3, 2])
-        
-        with col1:
-            if not daily_agg.empty:
-                # Create combination chart
+            
+            daily_analysis["AvgBasket"] = daily_analysis["Sales"] / daily_analysis["Tickets"]
+            daily_analysis["ItemsPerBasket"] = daily_analysis["Qty"] / daily_analysis["Tickets"]
+            
+            # Visualization
+            col1, col2 = st.columns([3, 2])
+            
+            with col1:
                 fig = go.Figure()
                 
                 # Sales bars
                 fig.add_trace(go.Bar(
-                    x=daily_agg["Day"],
-                    y=daily_agg["Sales"],
-                    name="Sales",
+                    x=daily_analysis["Date"],
+                    y=daily_analysis["Sales"],
+                    name="Daily Sales",
                     marker_color="#3b82f6",
-                    opacity=0.95,
-                    text=daily_agg["Sales"].round(0),
-                    textposition="outside",
-                    texttemplate='%{text:,.0f}'
+                    opacity=0.8
                 ))
                 
-                # Conversion line
+                # Average basket line
                 fig.add_trace(go.Scatter(
-                    x=daily_agg["Day"],
-                    y=daily_agg["Conv"],
-                    name="Sales Conversion",
-                    mode="lines+markers",
-                    line=dict(width=3, color="#f59e0b"),
-                    marker=dict(size=8),
+                    x=daily_analysis["Date"],
+                    y=daily_analysis["AvgBasket"] * 10,  # Scale for visibility
+                    name="Avg Basket (×10)",
+                    line=dict(color="#f59e0b", width=3),
                     yaxis="y2"
                 ))
                 
-                # Layout
                 fig.update_layout(
-                    title="Daily Sales and Conversion Trend",
-                    xaxis=dict(
-                        title="",
-                        tickangle=-45,
-                        showgrid=True,
-                        gridcolor="#f0f0f0"
-                    ),
-                    yaxis=dict(
-                        title="Sales (SAR)",
-                        showgrid=True,
-                        gridcolor="#f0f0f0"
-                    ),
+                    title=f"Sales Trend - {selected_period}",
+                    xaxis_title="Date",
+                    yaxis_title="Sales (SAR)",
                     yaxis2=dict(
-                        title="Conversion %",
+                        title="Avg Basket (×10)",
                         overlaying="y",
-                        side="right",
-                        showgrid=False,
-                        rangemode="tozero"
-                    ),
-                    legend=dict(
-                        orientation="h",
-                        y=1.1,
-                        x=0
+                        side="right"
                     ),
                     plot_bgcolor="#ffffff",
                     paper_bgcolor="#ffffff",
-                    height=400,
-                    hovermode='x unified'
+                    height=400
                 )
                 
                 st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No data available for the selected month")
+            
+            with col2:
+                # Category performance for the period
+                if period_data["Category"].notna().any():
+                    cat_sales = period_data.groupby("Category")["Sales"].sum().sort_values(ascending=False).reset_index()
+                    donut_chart = VisualizationEngine.create_donut_chart(
+                        cat_sales,
+                        f"Category Mix - {selected_period}"
+                    )
+                    st.plotly_chart(donut_chart, use_container_width=True)
         
-        with col2:
-            if month_data["Category"].notna().any():
-                cat_sales = month_data.groupby("Category")["Sales"].sum().sort_values(ascending=False).reset_index()
-                donut_chart = VisualizationEngine.create_donut_chart(
-                    cat_sales,
-                    f"Category Breakdown - {selected_month}"
-                )
-                st.plotly_chart(donut_chart, use_container_width=True)
-            else:
-                st.info("No category data available")
-    
-    # Store comparison
-    if filtered_data["Store"].notna().any() and len(filtered_data["Store"].unique()) > 1:
-        st.markdown("### 🏪 Store Performance Comparison")
-        store_sales = filtered_data.groupby("Store")["Sales"].sum().sort_values(ascending=True).reset_index()
-        
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            y=store_sales["Store"],
-            x=store_sales["Sales"],
-            orientation='h',
-            marker_color='#3b82f6',
-            text=store_sales["Sales"].round(0),
-            textposition='outside',
-            texttemplate='SAR %{text:,.0f}'
-        ))
-        
-        fig.update_layout(
-            title="Store Performance Comparison",
-            xaxis=dict(title="Sales (SAR)"),
-            yaxis=dict(title=""),
-            plot_bgcolor="#ffffff",
-            paper_bgcolor="#ffffff",
-            height=300
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
+        # Store comparison
+        if filtered_data["Store"].notna().any() and len(filtered_data["Store"].unique()) > 1:
+            st.markdown("### 🏪 Multi-Store Performance Analysis")
+            
+            store_comparison = filtered_data.groupby("Store").agg({
+                "Sales": "sum",
+                "Tickets": "sum",
+                "Qty": "sum",
+                "GrossProfit": "sum"
+            }).reset_index()
+            
+            store_comparison["AvgBasket"] = store_comparison["Sales"] / store_comparison["Tickets"]
+            store_comparison["GrossMargin"] = (store_comparison["GrossProfit"] / store_comparison["Sales"] * 100).round(1)
+            
+            # Format for display
+            display_stores = store_comparison.copy()
+            display_stores["Sales"] = display_stores["Sales"].apply(lambda x: f"SAR {x:,.0f}")
+            display_stores["GrossProfit"] = display_stores["GrossProfit"].apply(lambda x: f"SAR {x:,.0f}")
+            display_stores["AvgBasket"] = display_stores["AvgBasket"].apply(lambda x: f"SAR {x:.2f}")
+            
+            st.dataframe(display_stores, use_container_width=True)
 
 def render_items_tab(filtered_data: pd.DataFrame):
     """Render the Top Items Analysis tab content"""
-    st.markdown("## ⭐ Top Items Analysis")
+    st.markdown("## ⭐ Product Performance Analytics")
     
     if filtered_data["Item"].notna().any():
+        # Top items analysis
+        item_analysis = (filtered_data.groupby("Item")
+                        .agg({
+                            "Sales": "sum", 
+                            "Qty": "sum", 
+                            "GrossProfit": "sum",
+                            "Tickets": "sum",
+                            "COGS": "sum"
+                        })
+                        .sort_values("Sales", ascending=False)
+                        .reset_index())
+        
+        # Calculate additional metrics
+        item_analysis["AvgPrice"] = item_analysis["Sales"] / item_analysis["Qty"]
+        item_analysis["MarginPct"] = (item_analysis["GrossProfit"] / item_analysis["Sales"] * 100).round(1)
+        item_analysis["Frequency"] = item_analysis["Qty"] / item_analysis["Tickets"]
+        item_analysis["Velocity"] = item_analysis["Qty"]  # Items sold
+        
         col1, col2 = st.columns([3, 2])
         
         with col1:
-            st.markdown("### 🏆 Top 10 Performing Items")
+            # Analysis type selector
+            analysis_type = st.selectbox(
+                "Analysis Type",
+                ["Top Sellers", "Most Profitable", "Best Margin", "Highest Frequency"]
+            )
             
-            top_10_items = (filtered_data.groupby("Item")
-                           .agg({
-                               "Sales": "sum", 
-                               "Qty": "sum", 
-                               "GrossProfit": "sum",
-                               "Tickets": "sum"
-                           })
-                           .sort_values("Sales", ascending=False)
-                           .head(10)
-                           .reset_index())
-            
-            # Calculate additional metrics
-            top_10_items["Avg_Price"] = top_10_items["Sales"] / top_10_items["Qty"]
-            top_10_items["Margin_Pct"] = (top_10_items["GrossProfit"] / top_10_items["Sales"] * 100).round(1)
+            if analysis_type == "Top Sellers":
+                display_data = item_analysis.sort_values("Sales", ascending=False).head(15)
+                metric_col = "Sales"
+            elif analysis_type == "Most Profitable":
+                display_data = item_analysis.sort_values("GrossProfit", ascending=False).head(15)
+                metric_col = "GrossProfit"
+            elif analysis_type == "Best Margin":
+                display_data = item_analysis.sort_values("MarginPct", ascending=False).head(15)
+                metric_col = "MarginPct"
+            else:  # Highest Frequency
+                display_data = item_analysis.sort_values("Frequency", ascending=False).head(15)
+                metric_col = "Frequency"
             
             # Format for display
-            display_items = top_10_items.copy()
+            display_items = display_data.copy()
             display_items["Sales"] = display_items["Sales"].apply(lambda x: f"SAR {x:,.0f}")
             display_items["GrossProfit"] = display_items["GrossProfit"].apply(lambda x: f"SAR {x:,.0f}")
-            display_items["Avg_Price"] = display_items["Avg_Price"].apply(lambda x: f"SAR {x:.2f}")
+            display_items["AvgPrice"] = display_items["AvgPrice"].apply(lambda x: f"SAR {x:.2f}")
+            display_items["Frequency"] = display_items["Frequency"].apply(lambda x: f"{x:.2f}")
             display_items["Qty"] = display_items["Qty"].astype(int)
             
-            display_items = display_items[["Item", "Sales", "Qty", "GrossProfit", "Margin_Pct", "Avg_Price"]]
-            display_items.columns = ["Item", "Sales", "Qty Sold", "Gross Profit", "Margin %", "Avg Price"]
+            # Select columns for display
+            display_columns = ["Item", "Sales", "Qty", "GrossProfit", "MarginPct", "AvgPrice", "Frequency"]
+            column_names = ["Item", "Sales", "Qty Sold", "Gross Profit", "Margin %", "Avg Price", "Frequency"]
             
-            st.dataframe(display_items, use_container_width=True, height=400)
+            display_items = display_items[display_columns]
+            display_items.columns = column_names
+            
+            st.dataframe(display_items, use_container_width=True, height=500)
         
         with col2:
-            st.markdown("### 📊 Top 5 Items Distribution")
+            # Performance insights
+            st.markdown("### 📊 Product Insights")
             
-            # Top items pie chart
-            top_items_chart_data = top_10_items.head(5)  # Top 5 for pie chart clarity
+            total_items = len(item_analysis)
+            top_20_pct = int(total_items * 0.2)
+            top_20_sales = item_analysis.head(top_20_pct)["Sales"].sum()
+            total_sales = item_analysis["Sales"].sum()
+            pareto_ratio = (top_20_sales / total_sales * 100) if total_sales > 0 else 0
+            
+            st.metric(
+                "Pareto Analysis",
+                f"{pareto_ratio:.1f}%",
+                f"Top 20% products contribution"
+            )
+            
+            avg_margin = item_analysis["MarginPct"].mean()
+            st.metric(
+                "Average Margin",
+                f"{avg_margin:.1f}%",
+                "Across all products"
+            )
+            
+            high_margin_count = len(item_analysis[item_analysis["MarginPct"] > 30])
+            st.metric(
+                "High Margin Items",
+                f"{high_margin_count}",
+                f"Items with >30% margin"
+            )
+            
+            # Top 5 items pie chart
+            top_5_items = item_analysis.head(5)
             
             fig = go.Figure(go.Pie(
-                labels=top_items_chart_data["Item"],
-                values=top_items_chart_data["Sales"],
+                labels=top_5_items["Item"].str[:20] + "...",
+                values=top_5_items["Sales"],
                 hole=0.4,
                 textinfo="label+percent",
                 marker=dict(colors=['#3b82f6', '#f59e0b', '#22c55e', '#ef4444', '#8b5cf6'])
             ))
             
             fig.update_layout(
-                title="Sales Distribution",
+                title="Top 5 Items by Sales",
                 showlegend=True,
-                height=400,
+                height=350,
                 plot_bgcolor="#ffffff",
                 paper_bgcolor="#ffffff"
             )
             
             st.plotly_chart(fig, use_container_width=True)
-        
-        # Item performance metrics
-        st.markdown("### 📈 Item Performance Insights")
-        
-        if not top_10_items.empty:
-            total_top10_sales = top_10_items["Sales"].sum()
-            total_sales = filtered_data["Sales"].sum()
-            top10_percentage = (total_top10_sales / total_sales * 100) if total_sales > 0 else 0
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric(
-                    "Top 10 Contribution",
-                    f"{top10_percentage:.1f}%",
-                    f"SAR {total_top10_sales:,.0f}"
-                )
-            
-            with col2:
-                avg_margin = top_10_items["Margin_Pct"].mean()
-                st.metric(
-                    "Avg Margin (Top 10)",
-                    f"{avg_margin:.1f}%",
-                    "Profitability"
-                )
-            
-            with col3:
-                best_seller = top_10_items.iloc[0]["Item"]
-                best_sales = top_10_items.iloc[0]["Sales"]
-                st.metric(
-                    "Best Seller",
-                    best_seller[:20] + "..." if len(best_seller) > 20 else best_seller,
-                    f"SAR {best_sales:,.0f}"
-                )
-            
-            with col4:
-                total_qty = top_10_items["Qty"].sum()
-                st.metric(
-                    "Units Sold (Top 10)",
-                    f"{total_qty:,.0f}",
-                    "Quantity"
-                )
+    
+    else:
+        st.info("No item-level data available for analysis")
 
 def render_insights_tab(filtered_data: pd.DataFrame, kpis: Dict[str, Any]):
     """Render the Business Insights tab content"""
-    st.markdown("## 💡 Business Intelligence")
+    st.markdown("## 💡 AI-Powered Business Intelligence")
     
-    col1, col2 = st.columns([1, 1])
+    col1, col2 = st.columns([2, 1])
     
     with col1:
         st.markdown("### 🎯 Key Performance Insights")
@@ -1031,6 +1311,45 @@ def render_insights_tab(filtered_data: pd.DataFrame, kpis: Dict[str, Any]):
                 st.markdown(f"- {insight}")
         else:
             st.write("No insights available for the current selection")
+        
+        # Advanced analytics
+        st.markdown("### 📈 Advanced Analytics")
+        
+        if filtered_data["Date"].notna().any():
+            # Trend analysis
+            if len(filtered_data["Date"].unique()) > 7:
+                daily_sales = filtered_data.groupby(filtered_data["Date"].dt.date)["Sales"].sum()
+                
+                # Calculate trend
+                x = np.arange(len(daily_sales))
+                y = daily_sales.values
+                
+                if len(x) > 1:
+                    slope = np.polyfit(x, y, 1)[0]
+                    trend_direction = "📈 Increasing" if slope > 0 else "📉 Decreasing" if slope < 0 else "➡️ Stable"
+                    daily_change = slope
+                    
+                    st.markdown(f"""
+                    <div class="alert-info">
+                        <strong>Sales Trend:</strong> {trend_direction}<br>
+                        <strong>Daily Change:</strong> SAR {daily_change:.2f} per day<br>
+                        <strong>Period:</strong> {len(daily_sales)} days analyzed
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        # Seasonality insights
+        if filtered_data["Date"].notna().any():
+            day_of_week_sales = filtered_data.groupby(filtered_data["Date"].dt.day_name())["Sales"].mean()
+            best_day = day_of_week_sales.idxmax()
+            best_day_sales = day_of_week_sales.max()
+            
+            st.markdown(f"""
+            <div class="alert-success">
+                <strong>Peak Performance:</strong> {best_day}<br>
+                <strong>Average Sales:</strong> SAR {best_day_sales:,.2f}<br>
+                <strong>Recommendation:</strong> Focus marketing efforts on {best_day}
+            </div>
+            """, unsafe_allow_html=True)
     
     with col2:
         st.markdown("### 📊 Performance Scorecard")
@@ -1042,6 +1361,8 @@ def render_insights_tab(filtered_data: pd.DataFrame, kpis: Dict[str, Any]):
              "✅" if kpis['gross_margin'] >= 25 else "⚠️"),
             ("Conversion Rate", f"{kpis['conversion_rate']:.1f}%", 
              "✅" if kpis['conversion_rate'] >= config.TARGET_THRESHOLDS["conversion_rate"] else "⚠️"),
+            ("Discount Control", f"{kpis['discount_rate']:.1f}%", 
+             "✅" if kpis['discount_rate'] <= 10 else "⚠️"),
             ("Liquidity Position", f"SAR {kpis['total_liquidity']:,.0f}", 
              "✅" if kpis['total_liquidity'] >= 50000 else "⚠️"),
             ("Overall Score", f"{kpis['performance_score']:.0f}/100", 
@@ -1056,11 +1377,35 @@ def render_insights_tab(filtered_data: pd.DataFrame, kpis: Dict[str, Any]):
                 st.write(metric)
             with col_c:
                 st.write(f"**{value}**")
+        
+        # Recommendations
+        st.markdown("### 💡 Smart Recommendations")
+        
+        recommendations = []
+        
+        if kpis['gross_margin'] < 25:
+            recommendations.append("🎯 Review pricing strategy to improve margins")
+        
+        if kpis['discount_rate'] > 10:
+            recommendations.append("💰 Optimize discount strategy to protect profitability")
+        
+        if kpis['conversion_rate'] < config.TARGET_THRESHOLDS["conversion_rate"]:
+            recommendations.append("📈 Focus on conversion rate improvement")
+        
+        if kpis['total_liquidity'] < 50000:
+            recommendations.append("💧 Monitor cash flow and liquidity position")
+        
+        if not recommendations:
+            recommendations.append("🎉 All key metrics are performing well!")
+        
+        for rec in recommendations:
+            st.markdown(f"- {rec}")
 
-def render_data_tab(filtered_data: pd.DataFrame, column_mapping: Dict[str, str]):
+def render_data_tab(filtered_data: pd.DataFrame, column_mapping: Dict[str, str], source_info: Dict[str, Any]):
     """Render the Data Management tab content"""
-    st.markdown("## 📊 Data Management")
+    st.markdown("## 📊 Data Management & Export")
     
+    # Data overview
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -1085,17 +1430,39 @@ def render_data_tab(filtered_data: pd.DataFrame, column_mapping: Dict[str, str])
         st.write(f"Conversion Rate: {config.TARGET_THRESHOLDS['conversion_rate']:.1f}%")
         st.write(f"Gross Margin: {config.TARGET_THRESHOLDS['gross_margin']:.1f}%")
         st.write(f"Liquidity Ratio: {config.TARGET_THRESHOLDS['liquidity_ratio']:.1f}")
+        st.write(f"Growth Rate: {config.TARGET_THRESHOLDS['growth_rate']:.1f}%")
     
     with col4:
         st.markdown("**🔗 Export Options**")
         
-        # Excel export
+        # Excel export with multiple sheets
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            # Main data
             filtered_data.to_excel(writer, sheet_name='Complete Data', index=False)
+            
+            # Summary by store
+            if filtered_data["Store"].notna().any():
+                store_summary = filtered_data.groupby("Store").agg({
+                    "Sales": "sum",
+                    "Qty": "sum",
+                    "Tickets": "sum",
+                    "GrossProfit": "sum"
+                }).reset_index()
+                store_summary.to_excel(writer, sheet_name='Store Summary', index=False)
+            
+            # Daily summary
+            if filtered_data["Date"].notna().any():
+                daily_summary = filtered_data.groupby(filtered_data["Date"].dt.date).agg({
+                    "Sales": "sum",
+                    "Qty": "sum",
+                    "Tickets": "sum",
+                    "GrossProfit": "sum"
+                }).reset_index()
+                daily_summary.to_excel(writer, sheet_name='Daily Summary', index=False)
         
         st.download_button(
-            label="📥 Download Excel",
+            label="📥 Download Excel Report",
             data=buffer.getvalue(),
             file_name=f"Alkhair_Dashboard_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1121,9 +1488,39 @@ def render_data_tab(filtered_data: pd.DataFrame, column_mapping: Dict[str, str])
     })
     st.dataframe(mapping_df, use_container_width=True, hide_index=True)
     
+    # Data sources summary
+    if source_info:
+        st.markdown("### 📊 Data Sources Summary")
+        sources_df = pd.DataFrame([
+            {
+                "Source": name.title(),
+                "Status": info['status'].title(),
+                "Records": info['rows'],
+                "Columns": len(info['columns']),
+                "URL": info['url'][:50] + "..." if len(info['url']) > 50 else info['url']
+            }
+            for name, info in source_info.items()
+        ])
+        st.dataframe(sources_df, use_container_width=True, hide_index=True)
+    
     # Raw data preview
     st.markdown("### 📋 Data Preview")
-    st.dataframe(filtered_data.head(100), use_container_width=True)
+    
+    # Show sample of each data source if available
+    if "DataSource" in filtered_data.columns and filtered_data["DataSource"].nunique() > 1:
+        selected_source = st.selectbox(
+            "Select Data Source to Preview",
+            options=["All Sources"] + list(filtered_data["DataSource"].unique())
+        )
+        
+        if selected_source == "All Sources":
+            preview_data = filtered_data.head(100)
+        else:
+            preview_data = filtered_data[filtered_data["DataSource"] == selected_source].head(100)
+    else:
+        preview_data = filtered_data.head(100)
+    
+    st.dataframe(preview_data, use_container_width=True)
 
 # =========================
 # MAIN APPLICATION
@@ -1149,7 +1546,10 @@ def main():
                     🏪 Alkhair Family Market — Executive Dashboard
                 </div>
                 <div style="font-size:0.9rem;opacity:0.8;margin-top:4px;">
-                    Comprehensive Business Intelligence & Performance Analytics
+                    Multi-Source Business Intelligence & Performance Analytics
+                    <span class="data-source-indicator">
+                        {len(config.DATA_SOURCES)} Data Sources
+                    </span>
                 </div>
             </div>
             <div style="text-align:right;font-size:0.85rem;">
@@ -1167,25 +1567,38 @@ def main():
             st.cache_data.clear()
             st.rerun()
     
-    # Load data
+    # Load data from multiple sources
     @st.cache_data(ttl=0, show_spinner=False)
-    def load_data(url: str) -> pd.DataFrame:
-        csv_url = DataProcessor.convert_gsheet_url(url)
-        return pd.read_csv(csv_url)
+    def load_multiple_data_sources(sources: Dict[str, str]) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+        return DataProcessor.load_multiple_sources(sources)
     
     try:
-        with st.spinner("Loading data..."):
-            raw_data = load_data(config.GSHEET_URL)
+        with st.spinner("Loading data from multiple sources..."):
+            combined_data, source_info = load_multiple_data_sources(config.DATA_SOURCES)
     except Exception as e:
         st.error(f"❌ Failed to load data: {e}")
         st.stop()
     
+    # Show data loading status
+    successful_sources = sum(1 for info in source_info.values() if info['status'] == 'success')
+    if successful_sources == 0:
+        st.error("❌ No data sources loaded successfully. Please check your connections.")
+        st.stop()
+    elif successful_sources < len(source_info):
+        st.warning(f"⚠️ {successful_sources}/{len(source_info)} data sources loaded successfully.")
+    else:
+        st.success(f"✅ All {successful_sources} data sources loaded successfully!")
+    
     # Standardize data
-    data, column_mapping = DataProcessor.standardize_dataframe(raw_data)
+    if combined_data.empty:
+        st.error("❌ No data available after loading sources.")
+        st.stop()
+    
+    data, column_mapping = DataProcessor.standardize_dataframe(combined_data)
     
     # Filters in main area (before tabs)
     st.markdown("### 🔍 Data Filters")
-    col1, col2, col3 = st.columns([2, 2, 6])
+    col1, col2, col3, col4 = st.columns([2, 2, 3, 3])
     
     # Date range filter
     if data["Date"].notna().any():
@@ -1227,17 +1640,32 @@ def main():
         if selected_stores:
             filtered_data = filtered_data[filtered_data["Store"].isin(selected_stores)]
     
+    # Data source filter
+    if "DataSource" in filtered_data.columns and filtered_data["DataSource"].nunique() > 1:
+        with col4:
+            data_sources = list(filtered_data["DataSource"].unique())
+            selected_sources = st.multiselect(
+                "Select Data Source(s)",
+                options=data_sources,
+                default=data_sources,
+                key="source_filter"
+            )
+        
+        if selected_sources:
+            filtered_data = filtered_data[filtered_data["DataSource"].isin(selected_sources)]
+    
     # Calculate KPIs
     kpis = AnalyticsEngine.calculate_kpis(filtered_data)
     
     # Create tabs
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📊 Overview", 
         "💰 Financial", 
         "📈 Sales", 
-        "⭐ Top Items", 
+        "⭐ Products", 
         "💡 Insights", 
-        "📊 Data"
+        "📊 Data Sources",
+        "📋 Export"
     ])
     
     # Render tab content
@@ -1257,7 +1685,10 @@ def main():
         render_insights_tab(filtered_data, kpis)
     
     with tab6:
-        render_data_tab(filtered_data, column_mapping)
+        render_data_sources_tab(source_info, filtered_data)
+    
+    with tab7:
+        render_data_tab(filtered_data, column_mapping, source_info)
 
 if __name__ == "__main__":
     try:
