@@ -52,16 +52,25 @@ def apply_modern_css():
             font-family: 'Poppins', sans-serif !important;
             background: #ffffff !important;
             color: #1a202c;
+            margin: 0 !important;
+            padding: 0 !important;
         }
         
         .stApp > header {
             background-color: transparent !important;
+            height: 0 !important;
         }
         
         .main .block-container { 
             padding: 0 !important;
             max-width: 100% !important;
-            margin: 0 auto !important;
+            margin: 0 !important;
+            padding-top: 0 !important;
+        }
+        
+        /* Remove Streamlit's default padding */
+        .main > div {
+            padding-top: 0 !important;
         }
         
         /* Dashboard Layout */
