@@ -10,7 +10,7 @@ import pandas as pd
 import requests
 import streamlit as st
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+# Remove the problematic import
 import plotly.express as px
 
 # =========================================
@@ -436,15 +436,6 @@ def create_enhanced_trend_chart(df: pd.DataFrame, metric_col: str, target_col: s
     if df.empty or "Date" not in df.columns:
         return go.Figure()
     
-    # Create subplots
-    fig = make_subplots(
-        rows=2, cols=1,
-        row_heights=[0.7, 0.3],
-        subplot_titles=[title, "Performance %"],
-        vertical_spacing=0.1,
-        shared_xaxis=True
-    )
-    
     # Group by date and branch
     agg_func = "mean" if "ABV" in metric_col else "sum"
     daily_data = df.groupby(["Date", "BranchName", "BranchColor"]).agg({
@@ -452,15 +443,13 @@ def create_enhanced_trend_chart(df: pd.DataFrame, metric_col: str, target_col: s
         target_col: agg_func if target_col in df.columns else "sum"
     }).reset_index()
     
-    # Add performance percentage
-    if target_col in daily_data.columns:
-        daily_data["Performance"] = (daily_data[metric_col] / daily_data[target_col] * 100).fillna(0)
+    fig = go.Figure()
     
-    colors = px.colors.qualitative.Set1
+    colors = ["#1e40af", "#059669", "#dc2626", "#7c3aed", "#f59e0b"]
     
     for i, branch in enumerate(sorted(daily_data["BranchName"].unique())):
-        branch_data = daily_data[daily_data["BranchName"] == branch]
-        color = branch_data["BranchColor"].iloc[0] if not branch_data.empty else colors[i % len(colors)]
+        branch_data = daily_data[daily_data["BranchName"] == branch].sort_values("Date")
+        color = colors[i % len(colors)]
         
         # Main trend line with area fill
         fig.add_trace(
@@ -470,11 +459,11 @@ def create_enhanced_trend_chart(df: pd.DataFrame, metric_col: str, target_col: s
                 name=f"{branch} - Actual",
                 mode="lines+markers",
                 line=dict(width=3, color=color),
-                fill="tonexty" if i > 0 else "tozeroy",
-                fillcolor=f"rgba{tuple(list(px.colors.hex_to_rgb(color)) + [0.1])}",
+                fill="tozeroy",
+                fillcolor=f"rgba({int(color[1:3], 16)}, {int(color[3:5], 16)}, {int(color[5:7], 16)}, 0.1)",
                 hovertemplate=f"<b>{branch}</b><br>Date: %{{x|%Y-%m-%d}}<br>Actual: %{{y:,.0f}}<extra></extra>",
-            ),
-            row=1, col=1
+                marker=dict(size=6)
+            )
         )
         
         # Target line
@@ -488,34 +477,74 @@ def create_enhanced_trend_chart(df: pd.DataFrame, metric_col: str, target_col: s
                     line=dict(width=2, color=color, dash="dot"),
                     hovertemplate=f"<b>{branch}</b><br>Date: %{{x|%Y-%m-%d}}<br>Target: %{{y:,.0f}}<extra></extra>",
                     showlegend=False
-                ),
-                row=1, col=1
+                )
             )
-            
-            # Performance percentage
-            fig.add_trace(
-                go.Scatter(
-                    x=branch_data["Date"],
-                    y=branch_data["Performance"],
-                    name=f"{branch} %",
-                    mode="lines+markers",
-                    line=dict(width=2, color=color),
-                    hovertemplate=f"<b>{branch}</b><br>Date: %{{x|%Y-%m-%d}}<br>Performance: %{{y:.1f}}%<extra></extra>",
-                    showlegend=False
-                ),
-                row=2, col=1
-            )
-    
-    # Add target line for performance
-    fig.add_hline(y=100, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
     
     fig.update_layout(
-        height=600,
+        title=title,
+        height=450,
         showlegend=True,
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
         legend=dict(orientation="h", y=1.02, x=0.5, xanchor="center"),
-        hovermode="x unified"
+        hovermode="x unified",
+        xaxis_title="Date",
+        yaxis_title="Value"
+    )
+    
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(0,0,0,0.1)")
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(0,0,0,0.1)")
+    
+    return fig
+
+def create_performance_percentage_chart(df: pd.DataFrame, metric_col: str, target_col: str, title: str) -> go.Figure:
+    """Create performance percentage chart"""
+    if df.empty or "Date" not in df.columns or target_col not in df.columns:
+        return go.Figure()
+    
+    # Group by date and branch
+    agg_func = "mean" if "ABV" in metric_col else "sum"
+    daily_data = df.groupby(["Date", "BranchName"]).agg({
+        metric_col: agg_func,
+        target_col: agg_func
+    }).reset_index()
+    
+    # Calculate performance percentage
+    daily_data["Performance"] = (daily_data[metric_col] / daily_data[target_col] * 100).fillna(0)
+    
+    fig = go.Figure()
+    
+    colors = ["#1e40af", "#059669", "#dc2626", "#7c3aed", "#f59e0b"]
+    
+    for i, branch in enumerate(sorted(daily_data["BranchName"].unique())):
+        branch_data = daily_data[daily_data["BranchName"] == branch].sort_values("Date")
+        color = colors[i % len(colors)]
+        
+        fig.add_trace(
+            go.Scatter(
+                x=branch_data["Date"],
+                y=branch_data["Performance"],
+                name=f"{branch} %",
+                mode="lines+markers",
+                line=dict(width=3, color=color),
+                hovertemplate=f"<b>{branch}</b><br>Date: %{{x|%Y-%m-%d}}<br>Performance: %{{y:.1f}}%<extra></extra>",
+                marker=dict(size=6)
+            )
+        )
+    
+    # Add 100% target line
+    fig.add_hline(y=100, line_dash="dash", line_color="red", opacity=0.7, annotation_text="Target (100%)")
+    
+    fig.update_layout(
+        title=f"{title} - Performance %",
+        height=300,
+        showlegend=True,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", y=1.02, x=0.5, xanchor="center"),
+        hovermode="x unified",
+        xaxis_title="Date",
+        yaxis_title="Performance %"
     )
     
     fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(0,0,0,0.1)")
@@ -865,6 +894,13 @@ def main():
                     trend_df, "SalesActual", "SalesTarget", "Daily Sales Performance"
                 )
                 st.plotly_chart(fig_sales, use_container_width=True, config={"displayModeBar": False})
+                
+                # Performance percentage chart
+                if "SalesTarget" in trend_df.columns:
+                    fig_sales_perf = create_performance_percentage_chart(
+                        trend_df, "SalesActual", "SalesTarget", "Sales"
+                    )
+                    st.plotly_chart(fig_sales_perf, use_container_width=True, config={"displayModeBar": False})
             else:
                 st.info("No sales data available for the selected period.")
         
@@ -874,6 +910,13 @@ def main():
                     trend_df, "NOBActual", "NOBTarget", "Daily Basket Count Performance"
                 )
                 st.plotly_chart(fig_nob, use_container_width=True, config={"displayModeBar": False})
+                
+                # Performance percentage chart
+                if "NOBTarget" in trend_df.columns:
+                    fig_nob_perf = create_performance_percentage_chart(
+                        trend_df, "NOBActual", "NOBTarget", "NOB"
+                    )
+                    st.plotly_chart(fig_nob_perf, use_container_width=True, config={"displayModeBar": False})
             else:
                 st.info("No basket data available for the selected period.")
         
@@ -883,6 +926,13 @@ def main():
                     trend_df, "ABVActual", "ABVTarget", "Average Basket Value Performance"
                 )
                 st.plotly_chart(fig_abv, use_container_width=True, config={"displayModeBar": False})
+                
+                # Performance percentage chart
+                if "ABVTarget" in trend_df.columns:
+                    fig_abv_perf = create_performance_percentage_chart(
+                        trend_df, "ABVActual", "ABVTarget", "ABV"
+                    )
+                    st.plotly_chart(fig_abv_perf, use_container_width=True, config={"displayModeBar": False})
             else:
                 st.info("No basket value data available for the selected period.")
     
