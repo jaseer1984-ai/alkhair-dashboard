@@ -10,7 +10,6 @@ import pandas as pd
 import requests
 import streamlit as st
 import plotly.graph_objects as go
-# Remove the problematic import
 import plotly.express as px
 
 # =========================================
@@ -19,259 +18,444 @@ import plotly.express as px
 class Config:
     PAGE_TITLE = "Al Khair Business Performance"
     LAYOUT = "wide"
-    # Auto-refresh data source (no manual upload needed)
     AUTO_REFRESH_URL = (
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vQG7boLWl2bNLCPR05NXv6EFpPPcFfXsiXPQ7rAGYr3q8Nkc2Ijg8BqEwVofcMLSg/pubhtml"
     )
     BRANCHES = {
-        "Al khair - 102": {"name": "Al Khair", "code": "102", "color": "#1e40af", "icon": "🏢"},
-        "Noora - 104": {"name": "Noora", "code": "104", "color": "#059669", "icon": "🌟"},
-        "Hamra - 109": {"name": "Hamra", "code": "109", "color": "#dc2626", "icon": "🏪"},
-        "Magnus - 107": {"name": "Magnus", "code": "107", "color": "#7c3aed", "icon": "⭐"},
+        "Al khair - 102": {"name": "Al Khair", "code": "102", "color": "#6366f1", "icon": "🏢"},
+        "Noora - 104": {"name": "Noora", "code": "104", "color": "#10b981", "icon": "🌟"},
+        "Hamra - 109": {"name": "Hamra", "code": "109", "color": "#ef4444", "icon": "🏪"},
+        "Magnus - 107": {"name": "Magnus", "code": "107", "color": "#8b5cf6", "icon": "⭐"},
     }
     TARGETS = {"sales_achievement": 95.0, "nob_achievement": 90.0, "abv_achievement": 90.0}
-    REFRESH_INTERVAL = 300  # Auto-refresh every 5 minutes
+    REFRESH_INTERVAL = 300
 
 config = Config()
-st.set_page_config(page_title=config.PAGE_TITLE, layout=config.LAYOUT, initial_sidebar_state="expanded")
+st.set_page_config(page_title=config.PAGE_TITLE, layout=config.LAYOUT, initial_sidebar_state="collapsed")
 
 # =========================================
-# ENHANCED CSS
+# MODERN CSS DESIGN
 # =========================================
-def apply_enhanced_css():
+def apply_modern_css():
     st.markdown(
         """
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
         
         html, body, [data-testid="stAppViewContainer"] { 
-            font-family: 'Inter', sans-serif; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Poppins', sans-serif !important;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            color: #1a202c;
+        }
+        
+        .stApp > header {
+            background-color: transparent !important;
         }
         
         .main .block-container { 
-            padding: 1rem 2rem; 
-            max-width: 1600px; 
-            background: rgba(255,255,255,0.95);
-            border-radius: 20px;
-            margin: 1rem auto;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            padding: 0.5rem !important;
+            max-width: 100% !important;
+            margin: 0 !important;
         }
         
-        /* Header styling */
-        .dashboard-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        /* Dashboard Container */
+        .dashboard-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 25px;
             padding: 2rem;
-            border-radius: 15px;
+            margin: 1rem;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+        
+        /* Header */
+        .modern-header {
+            text-align: center;
+            padding: 2rem 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 20px;
             color: white;
             margin-bottom: 2rem;
-            text-align: center;
+            position: relative;
+            overflow: hidden;
         }
         
-        .dashboard-title {
-            font-size: 2.5rem;
+        .modern-header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="2" fill="white" opacity="0.1"/></svg>');
+            background-size: 30px 30px;
+        }
+        
+        .header-title {
+            font-size: 3rem;
             font-weight: 800;
             margin-bottom: 0.5rem;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            position: relative;
+            z-index: 1;
         }
         
-        .dashboard-subtitle {
-            font-size: 1.1rem;
+        .header-subtitle {
+            font-size: 1.2rem;
             opacity: 0.9;
             font-weight: 300;
+            position: relative;
+            z-index: 1;
         }
-
-        /* Enhanced metric cards */
-        .metric-card {
+        
+        /* Branch Filter Cards */
+        .branch-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        
+        .branch-card {
             background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
             border-radius: 20px;
-            padding: 2rem;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
-            border: 1px solid rgba(255,255,255,0.8);
-            transition: all 0.3s ease;
-            height: 100%;
-        }
-        
-        .metric-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 15px 35px rgba(0,0,0,0.15);
-        }
-        
-        .metric-icon {
-            font-size: 3rem;
-            margin-bottom: 1rem;
+            padding: 1.5rem;
             text-align: center;
-        }
-        
-        .metric-value {
-            font-size: 2.2rem;
-            font-weight: 800;
-            text-align: center;
-            margin-bottom: 0.5rem;
-        }
-        
-        .metric-label {
-            font-size: 0.9rem;
-            color: #64748b;
-            text-align: center;
-            font-weight: 500;
-        }
-        
-        .metric-change {
-            font-size: 0.85rem;
-            font-weight: 600;
-            text-align: center;
-            margin-top: 0.5rem;
-            padding: 0.3rem 0.8rem;
-            border-radius: 20px;
-        }
-        
-        .metric-change.positive {
-            background: #ecfdf5;
-            color: #059669;
-        }
-        
-        .metric-change.negative {
-            background: #fef2f2;
-            color: #dc2626;
-        }
-
-        /* Branch filter cards */
-        .branch-filter-container {
-            display: flex;
-            gap: 1rem;
-            margin: 1rem 0;
-            flex-wrap: wrap;
-        }
-        
-        .branch-filter-card {
-            background: white;
-            border: 2px solid #e5e7eb;
-            border-radius: 15px;
-            padding: 1rem 1.5rem;
             cursor: pointer;
-            transition: all 0.3s ease;
-            text-align: center;
-            min-width: 120px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 2px solid transparent;
+            position: relative;
+            overflow: hidden;
         }
         
-        .branch-filter-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        .branch-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: var(--branch-color);
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
         }
         
-        .branch-filter-card.selected {
-            border-color: #3b82f6;
-            background: #eff6ff;
-            box-shadow: 0 5px 15px rgba(59,130,246,0.2);
+        .branch-card:hover::before {
+            transform: scaleX(1);
+        }
+        
+        .branch-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+            border-color: var(--branch-color);
+        }
+        
+        .branch-card.selected {
+            border-color: var(--branch-color);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            background: linear-gradient(145deg, #f0f9ff 0%, #e0f2fe 100%);
+        }
+        
+        .branch-card.selected::before {
+            transform: scaleX(1);
         }
         
         .branch-icon {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            display: block;
         }
         
         .branch-name {
             font-weight: 600;
-            font-size: 0.9rem;
+            font-size: 1.1rem;
+            color: #1a202c;
         }
-
-        /* Enhanced branch performance cards */
-        .branch-performance-card {
+        
+        /* KPI Cards */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            margin: 2rem 0;
+        }
+        
+        .kpi-card {
             background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
-            border-radius: 20px;
-            padding: 1.5rem;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.08);
-            border-left: 5px solid;
+            border-radius: 25px;
+            padding: 2rem;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(255,255,255,0.5);
+        }
+        
+        .kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(circle at top right, var(--kpi-color, #6366f1) 0%, transparent 50%);
+            opacity: 0.05;
+            z-index: 0;
+        }
+        
+        .kpi-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+        }
+        
+        .kpi-content {
+            position: relative;
+            z-index: 1;
+        }
+        
+        .kpi-icon {
+            font-size: 3rem;
             margin-bottom: 1rem;
+            opacity: 0.8;
+        }
+        
+        .kpi-value {
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+            color: var(--kpi-color, #1a202c);
+        }
+        
+        .kpi-label {
+            font-size: 1rem;
+            color: #64748b;
+            font-weight: 500;
+            margin-bottom: 1rem;
+        }
+        
+        .kpi-change {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border-radius: 25px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        
+        .kpi-change.positive {
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+            color: #065f46;
+        }
+        
+        .kpi-change.negative {
+            background: linear-gradient(135deg, #fef2f2 0%, #fecaca 100%);
+            color: #991b1b;
+        }
+        
+        /* Performance Cards */
+        .performance-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin: 2rem 0;
+        }
+        
+        .performance-card {
+            background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+            border-radius: 25px;
+            padding: 2rem;
+            position: relative;
+            overflow: hidden;
+            border-left: 6px solid var(--performance-color);
             transition: all 0.3s ease;
         }
         
-        .branch-performance-card:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 12px 30px rgba(0,0,0,0.12);
+        .performance-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
         }
         
         .performance-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 1rem;
+            margin-bottom: 2rem;
         }
         
         .performance-title {
-            font-size: 1.3rem;
+            font-size: 1.4rem;
             font-weight: 700;
+            color: #1a202c;
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 0.75rem;
         }
         
         .performance-score {
-            font-size: 1.1rem;
+            font-size: 1.2rem;
             font-weight: 800;
-            padding: 0.4rem 1rem;
-            border-radius: 25px;
+            padding: 0.75rem 1.5rem;
+            border-radius: 30px;
+            color: white;
+            background: var(--performance-color);
         }
         
         .performance-metrics {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 1rem;
-            margin-top: 1rem;
+            gap: 1.5rem;
         }
         
         .performance-metric {
             text-align: center;
-            padding: 0.8rem;
-            background: rgba(255,255,255,0.7);
-            border-radius: 12px;
+            padding: 1rem;
+            background: rgba(255,255,255,0.8);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
         }
         
         .performance-metric-value {
-            font-size: 1.4rem;
+            font-size: 1.8rem;
             font-weight: 700;
-            margin-bottom: 0.2rem;
+            margin-bottom: 0.5rem;
+            color: var(--performance-color);
         }
         
         .performance-metric-label {
-            font-size: 0.8rem;
+            font-size: 0.9rem;
             color: #64748b;
             font-weight: 500;
         }
-
-        /* Status indicators */
-        .status-excellent { background: #ecfdf5; color: #059669; }
-        .status-good { background: #eff6ff; color: #2563eb; }
-        .status-warning { background: #fffbeb; color: #d97706; }
-        .status-danger { background: #fef2f2; color: #dc2626; }
-
-        /* Auto-refresh indicator */
-        .refresh-indicator {
+        
+        /* Status Colors */
+        .status-excellent { --performance-color: #10b981; }
+        .status-good { --performance-color: #6366f1; }
+        .status-warning { --performance-color: #f59e0b; }
+        .status-danger { --performance-color: #ef4444; }
+        
+        /* Insights */
+        .insights-container {
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+            border-radius: 20px;
+            padding: 2rem;
+            margin: 2rem 0;
+            border: 1px solid rgba(99,102,241,0.2);
+        }
+        
+        .insight-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem;
+            margin: 0.5rem 0;
+            background: rgba(255,255,255,0.7);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+        
+        /* Streamlit Overrides */
+        .stTabs [data-baseweb="tab-list"] {
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            border-radius: 15px;
+            padding: 0.5rem;
+            gap: 0.5rem;
+        }
+        
+        .stTabs [data-baseweb="tab"] {
+            border-radius: 12px !important;
+            padding: 1rem 2rem !important;
+            font-weight: 600 !important;
+            border: none !important;
+            background: transparent !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        .stTabs [aria-selected="true"] {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
+            color: white !important;
+            box-shadow: 0 5px 15px rgba(99,102,241,0.4) !important;
+        }
+        
+        /* Date inputs */
+        .stDateInput > div > div > input {
+            border-radius: 12px !important;
+            border: 2px solid #e2e8f0 !important;
+            padding: 0.75rem !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        .stDateInput > div > div > input:focus {
+            border-color: #6366f1 !important;
+            box-shadow: 0 0 0 3px rgba(99,102,241,0.1) !important;
+        }
+        
+        /* Selectbox */
+        .stSelectbox > div > div {
+            border-radius: 12px !important;
+            border: 2px solid #e2e8f0 !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        .stSelectbox > div > div:focus-within {
+            border-color: #6366f1 !important;
+            box-shadow: 0 0 0 3px rgba(99,102,241,0.1) !important;
+        }
+        
+        /* Refresh button */
+        .refresh-btn {
             position: fixed;
             top: 20px;
             right: 20px;
-            background: rgba(59,130,246,0.9);
+            z-index: 1000;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
             color: white;
-            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 50px;
+            padding: 1rem;
+            font-size: 1.2rem;
+            cursor: pointer;
+            box-shadow: 0 10px 20px rgba(99,102,241,0.3);
+            transition: all 0.3s ease;
+        }
+        
+        .refresh-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 15px 30px rgba(99,102,241,0.4);
+        }
+        
+        /* Auto refresh indicator */
+        .auto-refresh {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(16,185,129,0.9);
+            color: white;
+            padding: 0.75rem 1.5rem;
             border-radius: 25px;
-            font-size: 0.8rem;
+            font-size: 0.9rem;
             font-weight: 600;
             z-index: 1000;
             backdrop-filter: blur(10px);
+            box-shadow: 0 5px 15px rgba(16,185,129,0.3);
         }
-
-        /* Hide streamlit elements */
+        
+        /* Hide Streamlit elements */
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
-        header {visibility: hidden;}
+        .stDeployButton {display: none;}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 # =========================================
-# AUTO DATA LOADING
+# DATA FUNCTIONS
 # =========================================
 def _pubhtml_to_xlsx(url: str) -> str:
     if "docs.google.com/spreadsheets/d/e/" in url:
@@ -306,31 +490,16 @@ def auto_load_data() -> Dict[str, pd.DataFrame]:
 def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     combined: List[pd.DataFrame] = []
     mapping = {
-        "Date": "Date",
-        "Day": "Day",
-        "Sales Target": "SalesTarget",
-        "SalesTarget": "SalesTarget",
-        "Sales Achivement": "SalesActual",
-        "Sales Achievement": "SalesActual",
-        "SalesActual": "SalesActual",
-        "Sales %": "SalesPercent",
-        " Sales %": "SalesPercent",
-        "SalesPercent": "SalesPercent",
-        "NOB Target": "NOBTarget",
-        "NOBTarget": "NOBTarget",
-        "NOB Achievemnet": "NOBActual",
-        "NOB Achievement": "NOBActual",
-        "NOBActual": "NOBActual",
-        "NOB %": "NOBPercent",
-        " NOB %": "NOBPercent",
-        "NOBPercent": "NOBPercent",
-        "ABV Target": "ABVTarget",
-        "ABVTarget": "ABVTarget",
-        "ABV Achievement": "ABVActual",
-        " ABV Achievement": "ABVActual",
-        "ABVActual": "ABVActual",
-        "ABV %": "ABVPercent",
-        "ABVPercent": "ABVPercent",
+        "Date": "Date", "Day": "Day",
+        "Sales Target": "SalesTarget", "SalesTarget": "SalesTarget",
+        "Sales Achivement": "SalesActual", "Sales Achievement": "SalesActual", "SalesActual": "SalesActual",
+        "Sales %": "SalesPercent", " Sales %": "SalesPercent", "SalesPercent": "SalesPercent",
+        "NOB Target": "NOBTarget", "NOBTarget": "NOBTarget",
+        "NOB Achievemnet": "NOBActual", "NOB Achievement": "NOBActual", "NOBActual": "NOBActual",
+        "NOB %": "NOBPercent", " NOB %": "NOBPercent", "NOBPercent": "NOBPercent",
+        "ABV Target": "ABVTarget", "ABVTarget": "ABVTarget",
+        "ABV Achievement": "ABVActual", " ABV Achievement": "ABVActual", "ABVActual": "ABVActual",
+        "ABV %": "ABVPercent", "ABVPercent": "ABVPercent",
     }
     
     for sheet_name, df in excel_data.items():
@@ -351,7 +520,7 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         d["BranchName"] = meta.get("name", sheet_name)
         d["BranchCode"] = meta.get("code", "000")
         d["BranchIcon"] = meta.get("icon", "🏪")
-        d["BranchColor"] = meta.get("color", "#6b7280")
+        d["BranchColor"] = meta.get("color", "#6366f1")
         
         if "Date" in d.columns:
             d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
@@ -391,17 +560,11 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
 
     if "BranchName" in df.columns:
         k["branch_performance"] = (
-            df.groupby(["BranchName", "BranchIcon", "BranchColor"])
+            df.groupby("BranchName")
             .agg({
-                "SalesTarget": "sum",
-                "SalesActual": "sum",
-                "SalesPercent": "mean",
-                "NOBTarget": "sum",
-                "NOBActual": "sum",
-                "NOBPercent": "mean",
-                "ABVTarget": "mean",
-                "ABVActual": "mean",
-                "ABVPercent": "mean",
+                "SalesTarget": "sum", "SalesActual": "sum", "SalesPercent": "mean",
+                "NOBTarget": "sum", "NOBActual": "sum", "NOBPercent": "mean",
+                "ABVTarget": "mean", "ABVActual": "mean", "ABVPercent": "mean",
             })
             .round(2)
         )
@@ -413,7 +576,6 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
             "days": int(df["Date"].dt.date.nunique())
         }
 
-    # Performance score calculation
     score = w = 0.0
     if k.get("overall_sales_percent", 0) > 0:
         score += min(k["overall_sales_percent"] / 100, 1.2) * 40
@@ -429,14 +591,13 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
     return k
 
 # =========================================
-# ENHANCED VISUALIZATIONS
+# CHART FUNCTIONS
 # =========================================
-def create_enhanced_trend_chart(df: pd.DataFrame, metric_col: str, target_col: str, title: str) -> go.Figure:
-    """Create enhanced daily trend chart with better styling"""
+def create_modern_trend_chart(df: pd.DataFrame, metric_col: str, target_col: str, title: str) -> go.Figure:
+    """Create modern trend chart"""
     if df.empty or "Date" not in df.columns:
         return go.Figure()
     
-    # Group by date and branch
     agg_func = "mean" if "ABV" in metric_col else "sum"
     daily_data = df.groupby(["Date", "BranchName", "BranchColor"]).agg({
         metric_col: agg_func,
@@ -445,24 +606,25 @@ def create_enhanced_trend_chart(df: pd.DataFrame, metric_col: str, target_col: s
     
     fig = go.Figure()
     
-    colors = ["#1e40af", "#059669", "#dc2626", "#7c3aed", "#f59e0b"]
-    
-    for i, branch in enumerate(sorted(daily_data["BranchName"].unique())):
+    for branch in sorted(daily_data["BranchName"].unique()):
         branch_data = daily_data[daily_data["BranchName"] == branch].sort_values("Date")
-        color = colors[i % len(colors)]
+        if branch_data.empty:
+            continue
+            
+        color = branch_data["BranchColor"].iloc[0]
         
-        # Main trend line with area fill
+        # Actual values
         fig.add_trace(
             go.Scatter(
                 x=branch_data["Date"],
                 y=branch_data[metric_col],
-                name=f"{branch} - Actual",
+                name=f"{branch}",
                 mode="lines+markers",
-                line=dict(width=3, color=color),
-                fill="tozeroy",
+                line=dict(width=4, color=color),
+                marker=dict(size=8, color=color),
+                fill="tonexty" if len(fig.data) > 0 else "tozeroy",
                 fillcolor=f"rgba({int(color[1:3], 16)}, {int(color[3:5], 16)}, {int(color[5:7], 16)}, 0.1)",
-                hovertemplate=f"<b>{branch}</b><br>Date: %{{x|%Y-%m-%d}}<br>Actual: %{{y:,.0f}}<extra></extra>",
-                marker=dict(size=6)
+                hovertemplate=f"<b>{branch}</b><br>Date: %{{x}}<br>Actual: %{{y:,.0f}}<extra></extra>",
             )
         )
         
@@ -472,88 +634,79 @@ def create_enhanced_trend_chart(df: pd.DataFrame, metric_col: str, target_col: s
                 go.Scatter(
                     x=branch_data["Date"],
                     y=branch_data[target_col],
-                    name=f"{branch} - Target",
+                    name=f"{branch} Target",
                     mode="lines",
                     line=dict(width=2, color=color, dash="dot"),
-                    hovertemplate=f"<b>{branch}</b><br>Date: %{{x|%Y-%m-%d}}<br>Target: %{{y:,.0f}}<extra></extra>",
-                    showlegend=False
+                    showlegend=False,
+                    hovertemplate=f"<b>{branch} Target</b><br>Date: %{{x}}<br>Target: %{{y:,.0f}}<extra></extra>",
                 )
             )
     
     fig.update_layout(
-        title=title,
-        height=450,
-        showlegend=True,
+        title=dict(text=title, font=dict(size=20, weight=700)),
+        height=500,
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
         legend=dict(orientation="h", y=1.02, x=0.5, xanchor="center"),
         hovermode="x unified",
-        xaxis_title="Date",
-        yaxis_title="Value"
+        xaxis=dict(showgrid=True, gridwidth=1, gridcolor="rgba(0,0,0,0.1)"),
+        yaxis=dict(showgrid=True, gridwidth=1, gridcolor="rgba(0,0,0,0.1)"),
     )
-    
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(0,0,0,0.1)")
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(0,0,0,0.1)")
     
     return fig
 
-def create_performance_percentage_chart(df: pd.DataFrame, metric_col: str, target_col: str, title: str) -> go.Figure:
+def create_performance_chart(df: pd.DataFrame, metric_col: str, target_col: str, title: str) -> go.Figure:
     """Create performance percentage chart"""
     if df.empty or "Date" not in df.columns or target_col not in df.columns:
         return go.Figure()
     
-    # Group by date and branch
     agg_func = "mean" if "ABV" in metric_col else "sum"
-    daily_data = df.groupby(["Date", "BranchName"]).agg({
+    daily_data = df.groupby(["Date", "BranchName", "BranchColor"]).agg({
         metric_col: agg_func,
         target_col: agg_func
     }).reset_index()
     
-    # Calculate performance percentage
     daily_data["Performance"] = (daily_data[metric_col] / daily_data[target_col] * 100).fillna(0)
     
     fig = go.Figure()
     
-    colors = ["#1e40af", "#059669", "#dc2626", "#7c3aed", "#f59e0b"]
-    
-    for i, branch in enumerate(sorted(daily_data["BranchName"].unique())):
+    for branch in sorted(daily_data["BranchName"].unique()):
         branch_data = daily_data[daily_data["BranchName"] == branch].sort_values("Date")
-        color = colors[i % len(colors)]
+        if branch_data.empty:
+            continue
+            
+        color = branch_data["BranchColor"].iloc[0]
         
         fig.add_trace(
             go.Scatter(
                 x=branch_data["Date"],
                 y=branch_data["Performance"],
-                name=f"{branch} %",
+                name=f"{branch}",
                 mode="lines+markers",
                 line=dict(width=3, color=color),
-                hovertemplate=f"<b>{branch}</b><br>Date: %{{x|%Y-%m-%d}}<br>Performance: %{{y:.1f}}%<extra></extra>",
-                marker=dict(size=6)
+                marker=dict(size=6, color=color),
+                hovertemplate=f"<b>{branch}</b><br>Date: %{{x}}<br>Performance: %{{y:.1f}}%<extra></extra>",
             )
         )
     
-    # Add 100% target line
-    fig.add_hline(y=100, line_dash="dash", line_color="red", opacity=0.7, annotation_text="Target (100%)")
+    fig.add_hline(y=100, line_dash="dash", line_color="rgba(239,68,68,0.8)", line_width=2,
+                  annotation_text="Target (100%)", annotation_position="bottom right")
     
     fig.update_layout(
-        title=f"{title} - Performance %",
+        title=dict(text=f"{title} Performance %", font=dict(size=18, weight=600)),
         height=300,
-        showlegend=True,
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
         legend=dict(orientation="h", y=1.02, x=0.5, xanchor="center"),
         hovermode="x unified",
-        xaxis_title="Date",
-        yaxis_title="Performance %"
+        xaxis=dict(showgrid=True, gridwidth=1, gridcolor="rgba(0,0,0,0.1)"),
+        yaxis=dict(showgrid=True, gridwidth=1, gridcolor="rgba(0,0,0,0.1)", title="Performance %"),
     )
-    
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor="rgba(0,0,0,0.1)")
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor="rgba(0,0,0,0.1)")
     
     return fig
 
-def create_branch_comparison_radar(bp: pd.DataFrame) -> go.Figure:
-    """Create a radar chart for branch comparison"""
+def create_radar_chart(bp: pd.DataFrame) -> go.Figure:
+    """Fixed radar chart"""
     if bp.empty:
         return go.Figure()
     
@@ -561,243 +714,292 @@ def create_branch_comparison_radar(bp: pd.DataFrame) -> go.Figure:
     
     metrics = ["SalesPercent", "NOBPercent", "ABVPercent"]
     metric_labels = ["Sales %", "NOB %", "ABV %"]
+    colors = ["#6366f1", "#10b981", "#ef4444", "#8b5cf6"]
     
-    for branch in bp.index:
-        values = [bp.loc[branch, metric] for metric in metrics]
+    for i, branch_name in enumerate(bp.index):
+        values = [bp.loc[branch_name, metric] for metric in metrics]
         values.append(values[0])  # Close the radar
         
         fig.add_trace(go.Scatterpolar(
             r=values,
             theta=metric_labels + [metric_labels[0]],
             fill='toself',
-            name=branch,
-            hovertemplate=f"<b>{branch}</b><br>%{{theta}}: %{{r:.1f}}%<extra></extra>"
+            name=str(branch_name),  # Convert to string to fix the tuple issue
+            line_color=colors[i % len(colors)],
+            hovertemplate=f"<b>{branch_name}</b><br>%{{theta}}: %{{r:.1f}}%<extra></extra>"
         ))
     
     fig.update_layout(
         polar=dict(
             radialaxis=dict(
                 visible=True,
-                range=[0, 120]
+                range=[0, 120],
+                showgrid=True,
+                gridcolor="rgba(0,0,0,0.1)"
             )),
         showlegend=True,
-        title="Branch Performance Radar",
-        height=400
+        title=dict(text="Branch Performance Comparison", font=dict(size=18, weight=600)),
+        height=400,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)"
     )
     
     return fig
 
 # =========================================
-# ENHANCED UI COMPONENTS
+# UI COMPONENTS
 # =========================================
-def render_dashboard_header():
-    """Render enhanced dashboard header"""
+def render_header():
+    """Render modern header"""
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     st.markdown(f"""
-        <div class="dashboard-header">
-            <div class="dashboard-title">🏢 Al Khair Business Performance</div>
-            <div class="dashboard-subtitle">Real-time Business Analytics • Last Updated: {current_time}</div>
+        <div class="modern-header">
+            <div class="header-title">🏢 Al Khair Business Performance</div>
+            <div class="header-subtitle">Real-time Business Analytics • Last Updated: {current_time}</div>
         </div>
-        <div class="refresh-indicator">
+        <div class="auto-refresh">
             🔄 Auto-refresh: {config.REFRESH_INTERVAL//60}min
         </div>
     """, unsafe_allow_html=True)
 
-def render_enhanced_branch_filter(df: pd.DataFrame) -> List[str]:
-    """Render enhanced branch filter cards"""
+def render_branch_filter(df: pd.DataFrame) -> List[str]:
+    """Render modern branch filter"""
     if "BranchName" not in df.columns:
         return []
     
-    all_branches = sorted(df["BranchName"].unique())
     st.markdown("### 🏪 Select Branches")
     
-    # Use session state to track selected branches
     if "selected_branches" not in st.session_state:
-        st.session_state.selected_branches = all_branches
+        st.session_state.selected_branches = list(df["BranchName"].unique())
     
-    cols = st.columns(len(all_branches))
-    for i, branch in enumerate(all_branches):
+    branches_data = df[["BranchName", "BranchIcon", "BranchColor"]].drop_duplicates()
+    
+    cols = st.columns(len(branches_data))
+    for i, (_, row) in enumerate(branches_data.iterrows()):
         with cols[i]:
-            branch_info = df[df["BranchName"] == branch].iloc[0]
-            icon = branch_info.get("BranchIcon", "🏪")
-            color = branch_info.get("BranchColor", "#6b7280")
+            branch_name = row["BranchName"]
+            icon = row["BranchIcon"]
+            color = row["BranchColor"]
+            is_selected = branch_name in st.session_state.selected_branches
             
-            is_selected = branch in st.session_state.selected_branches
+            # Custom CSS for this branch
+            st.markdown(f"""
+                <style>
+                .branch-card-{i} {{
+                    --branch-color: {color};
+                }}
+                </style>
+            """, unsafe_allow_html=True)
             
             if st.button(
-                f"{icon}\n{branch}",
-                key=f"branch_{branch}",
-                help=f"Toggle {branch}",
-                use_container_width=True
+                f"{icon}\n{branch_name}",
+                key=f"branch_{i}",
+                help=f"Toggle {branch_name}",
+                use_container_width=True,
+                type="primary" if is_selected else "secondary"
             ):
                 if is_selected:
-                    st.session_state.selected_branches.remove(branch)
+                    st.session_state.selected_branches.remove(branch_name)
                 else:
-                    st.session_state.selected_branches.append(branch)
+                    st.session_state.selected_branches.append(branch_name)
                 st.rerun()
     
     return st.session_state.selected_branches
 
-def render_enhanced_kpi_cards(k: Dict[str, Any]):
-    """Render enhanced KPI cards"""
+def render_kpi_cards(kpis: Dict[str, Any]):
+    """Render modern KPI cards"""
     st.markdown("### 📊 Key Performance Indicators")
     
-    col1, col2, col3, col4 = st.columns(4)
+    kpi_data = [
+        {
+            "icon": "💰",
+            "value": f"SAR {kpis.get('total_sales_actual', 0):,.0f}",
+            "label": "Total Sales",
+            "change": f"{kpis.get('overall_sales_percent', 0):.1f}% of Target",
+            "color": "#10b981",
+            "positive": kpis.get("total_sales_variance", 0) >= 0
+        },
+        {
+            "icon": "🛍️",
+            "value": f"{kpis.get('total_nob_actual', 0):,.0f}",
+            "label": "Total Baskets",
+            "change": f"{kpis.get('overall_nob_percent', 0):.1f}% Achievement",
+            "color": "#6366f1",
+            "positive": kpis.get("overall_nob_percent", 0) >= 90
+        },
+        {
+            "icon": "💎",
+            "value": f"SAR {kpis.get('avg_abv_actual', 0):,.2f}",
+            "label": "Avg Basket Value",
+            "change": f"{kpis.get('overall_abv_percent', 0):.1f}% vs Target",
+            "color": "#8b5cf6",
+            "positive": kpis.get("overall_abv_percent", 0) >= 90
+        },
+        {
+            "icon": "⭐",
+            "value": f"{kpis.get('performance_score', 0):.0f}/100",
+            "label": "Performance Score",
+            "change": "Weighted Average",
+            "color": "#ef4444",
+            "positive": kpis.get("performance_score", 0) >= 80
+        }
+    ]
     
-    # Sales Card
-    with col1:
-        sales_change = "positive" if k.get("total_sales_variance", 0) >= 0 else "negative"
-        st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-icon">💰</div>
-                <div class="metric-value" style="color: #059669;">SAR {k.get('total_sales_actual',0):,.0f}</div>
-                <div class="metric-label">Total Sales</div>
-                <div class="metric-change {sales_change}">
-                    {k.get('overall_sales_percent',0):.1f}% of Target
+    cols = st.columns(len(kpi_data))
+    for i, (col, kpi) in enumerate(zip(cols, kpi_data)):
+        with col:
+            change_class = "positive" if kpi["positive"] else "negative"
+            st.markdown(f"""
+                <div class="kpi-card" style="--kpi-color: {kpi['color']}">
+                    <div class="kpi-content">
+                        <div class="kpi-icon">{kpi['icon']}</div>
+                        <div class="kpi-value">{kpi['value']}</div>
+                        <div class="kpi-label">{kpi['label']}</div>
+                        <div class="kpi-change {change_class}">{kpi['change']}</div>
+                    </div>
                 </div>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    # NOB Card
-    with col2:
-        nob_change = "positive" if k.get("overall_nob_percent", 0) >= 90 else "negative"
-        st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-icon">🛍️</div>
-                <div class="metric-value" style="color: #2563eb;">{k.get('total_nob_actual',0):,.0f}</div>
-                <div class="metric-label">Total Baskets</div>
-                <div class="metric-change {nob_change}">
-                    {k.get('overall_nob_percent',0):.1f}% Achievement
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    # ABV Card
-    with col3:
-        abv_change = "positive" if k.get("overall_abv_percent", 0) >= 90 else "negative"
-        st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-icon">💎</div>
-                <div class="metric-value" style="color: #7c3aed;">SAR {k.get('avg_abv_actual',0):,.2f}</div>
-                <div class="metric-label">Avg Basket Value</div>
-                <div class="metric-change {abv_change}">
-                    {k.get('overall_abv_percent',0):.1f}% vs Target
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    # Performance Score Card
-    with col4:
-        score_change = "positive" if k.get("performance_score", 0) >= 80 else "negative"
-        st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-icon">⭐</div>
-                <div class="metric-value" style="color: #dc2626;">{k.get('performance_score',0):.0f}/100</div>
-                <div class="metric-label">Performance Score</div>
-                <div class="metric-change {score_change}">
-                    Weighted Average
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-def render_enhanced_branch_cards(bp: pd.DataFrame):
-    """Render enhanced branch performance cards"""
+def render_performance_cards(bp: pd.DataFrame):
+    """Render modern performance cards"""
     if bp.empty:
         return
     
     st.markdown("### 🏪 Branch Performance")
     
-    for branch in bp.index:
-        branch_data = bp.loc[branch]
-        icon = branch_data.name[1] if isinstance(branch_data.name, tuple) else "🏪"
-        color = branch_data.name[2] if isinstance(branch_data.name, tuple) and len(branch_data.name) > 2 else "#6b7280"
+    # Get branch metadata
+    branch_colors = {"Al Khair": "#6366f1", "Noora": "#10b981", "Hamra": "#ef4444", "Magnus": "#8b5cf6"}
+    branch_icons = {"Al Khair": "🏢", "Noora": "🌟", "Hamra": "🏪", "Magnus": "⭐"}
+    
+    cols = st.columns(min(len(bp), 2))
+    for i, branch_name in enumerate(bp.index):
+        with cols[i % 2]:
+            branch_data = bp.loc[branch_name]
+            icon = branch_icons.get(branch_name, "🏪")
+            color = branch_colors.get(branch_name, "#6366f1")
+            
+            # Calculate overall performance
+            avg_perf = np.mean([
+                branch_data.get("SalesPercent", 0),
+                branch_data.get("NOBPercent", 0),
+                branch_data.get("ABVPercent", 0)
+            ])
+            
+            # Determine status
+            if avg_perf >= 95:
+                status_class = "status-excellent"
+            elif avg_perf >= 85:
+                status_class = "status-good"
+            elif avg_perf >= 75:
+                status_class = "status-warning"
+            else:
+                status_class = "status-danger"
+            
+            st.markdown(f"""
+                <div class="performance-card {status_class}" style="--performance-color: {color}">
+                    <div class="performance-header">
+                        <div class="performance-title">
+                            <span>{icon}</span>
+                            {branch_name}
+                        </div>
+                        <div class="performance-score">
+                            {avg_perf:.1f}%
+                        </div>
+                    </div>
+                    <div class="performance-metrics">
+                        <div class="performance-metric">
+                            <div class="performance-metric-value">
+                                {branch_data.get('SalesPercent', 0):.1f}%
+                            </div>
+                            <div class="performance-metric-label">Sales</div>
+                        </div>
+                        <div class="performance-metric">
+                            <div class="performance-metric-value">
+                                {branch_data.get('NOBPercent', 0):.1f}%
+                            </div>
+                            <div class="performance-metric-label">Baskets</div>
+                        </div>
+                        <div class="performance-metric">
+                            <div class="performance-metric-value">
+                                {branch_data.get('ABVPercent', 0):.1f}%
+                            </div>
+                            <div class="performance-metric-label">Basket Value</div>
+                        </div>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+
+def render_insights(kpis: Dict[str, Any]):
+    """Render insights section"""
+    insights = []
+    if "branch_performance" in kpis and not kpis["branch_performance"].empty:
+        bp = kpis["branch_performance"]
+        best_sales = bp["SalesPercent"].idxmax()
+        worst_sales = bp["SalesPercent"].idxmin()
         
-        # Calculate overall performance
-        avg_perf = np.mean([
-            branch_data.get("SalesPercent", 0),
-            branch_data.get("NOBPercent", 0),
-            branch_data.get("ABVPercent", 0)
+        insights.extend([
+            f"🥇 **Top Performer**: {best_sales} with {bp.loc[best_sales, 'SalesPercent']:.1f}% sales achievement",
+            f"📉 **Needs Attention**: {worst_sales} with {bp.loc[worst_sales, 'SalesPercent']:.1f}% sales achievement",
+            f"💰 **Total Revenue**: SAR {kpis.get('total_sales_actual', 0):,.0f} ({kpis.get('overall_sales_percent', 0):.1f}% of target)",
+            f"🛍️ **Customer Traffic**: {kpis.get('total_nob_actual', 0):,.0f} baskets processed"
         ])
         
-        # Determine status
-        if avg_perf >= 95:
-            status_class = "status-excellent"
-        elif avg_perf >= 85:
-            status_class = "status-good"
-        elif avg_perf >= 75:
-            status_class = "status-warning"
-        else:
-            status_class = "status-danger"
-        
-        st.markdown(f"""
-            <div class="branch-performance-card" style="border-left-color: {color};">
-                <div class="performance-header">
-                    <div class="performance-title">
-                        <span style="font-size: 1.5rem;">{icon}</span>
-                        {branch if isinstance(branch, str) else branch[0]}
-                    </div>
-                    <div class="performance-score {status_class}">
-                        {avg_perf:.1f}%
-                    </div>
-                </div>
-                <div class="performance-metrics">
-                    <div class="performance-metric">
-                        <div class="performance-metric-value" style="color: #059669;">
-                            {branch_data.get('SalesPercent', 0):.1f}%
-                        </div>
-                        <div class="performance-metric-label">Sales</div>
-                    </div>
-                    <div class="performance-metric">
-                        <div class="performance-metric-value" style="color: #2563eb;">
-                            {branch_data.get('NOBPercent', 0):.1f}%
-                        </div>
-                        <div class="performance-metric-label">Baskets</div>
-                    </div>
-                    <div class="performance-metric">
-                        <div class="performance-metric-value" style="color: #7c3aed;">
-                            {branch_data.get('ABVPercent', 0):.1f}%
-                        </div>
-                        <div class="performance-metric-label">Basket Value</div>
-                    </div>
-                </div>
-            </div>
+        if kpis.get('total_sales_variance', 0) < 0:
+            insights.append(f"⚠️ **Revenue Gap**: SAR {abs(kpis['total_sales_variance']):,.0f} below target")
+    
+    if insights:
+        st.markdown("""
+            <div class="insights-container">
+                <h3 style="margin-bottom: 1rem; color: #1a202c;">💡 Key Insights</h3>
         """, unsafe_allow_html=True)
+        
+        for insight in insights:
+            st.markdown(f"""
+                <div class="insight-item">
+                    {insight}
+                </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # =========================================
 # MAIN APPLICATION
 # =========================================
 def main():
-    apply_enhanced_css()
+    apply_modern_css()
     
-    # Auto-refresh indicator
-    if st.button("🔄", help="Manual Refresh", key="manual_refresh"):
+    # Container for the entire dashboard
+    st.markdown('<div class="dashboard-container">', unsafe_allow_html=True)
+    
+    # Manual refresh button
+    if st.button("🔄", help="Manual Refresh", key="refresh", type="primary"):
         auto_load_data.clear()
         st.rerun()
     
-    # Render header
-    render_dashboard_header()
+    # Header
+    render_header()
     
-    # Auto-load data (no manual upload needed)
+    # Load data
     with st.spinner("🔄 Loading latest data..."):
         sheets_map = auto_load_data()
     
     if not sheets_map:
-        st.error("❌ Unable to load data automatically. Please check your data source.")
+        st.error("❌ Unable to load data. Please check your data source.")
         st.stop()
     
     # Process data
     df = process_branch_data(sheets_map)
     if df.empty:
-        st.error("❌ No valid data found. Please check your data format.")
+        st.error("❌ No valid data found.")
         st.stop()
     
-    # Enhanced branch filter
-    selected_branches = render_enhanced_branch_filter(df)
+    # Branch filter
+    selected_branches = render_branch_filter(df)
     if not selected_branches:
         st.warning("⚠️ Please select at least one branch.")
         st.stop()
     
-    # Filter data by selected branches
+    # Filter data
     df_filtered = df[df["BranchName"].isin(selected_branches)].copy()
     
     # Date filter
@@ -805,19 +1007,10 @@ def main():
         st.markdown("### 📅 Date Range")
         col1, col2 = st.columns(2)
         with col1:
-            start_date = st.date_input(
-                "Start Date", 
-                value=df_filtered["Date"].min().date(),
-                key="start_date"
-            )
+            start_date = st.date_input("Start Date", value=df_filtered["Date"].min().date())
         with col2:
-            end_date = st.date_input(
-                "End Date", 
-                value=df_filtered["Date"].max().date(),
-                key="end_date"
-            )
+            end_date = st.date_input("End Date", value=df_filtered["Date"].max().date())
         
-        # Apply date filter
         mask = (df_filtered["Date"].dt.date >= start_date) & (df_filtered["Date"].dt.date <= end_date)
         df_filtered = df_filtered.loc[mask].copy()
     
@@ -828,44 +1021,20 @@ def main():
     # Calculate KPIs
     kpis = calc_kpis(df_filtered)
     
-    # Main content tabs
+    # Main tabs
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📈 Trends", "🎯 Analysis", "📤 Export"])
     
     with tab1:
-        # Enhanced KPI cards
-        render_enhanced_kpi_cards(kpis)
-        
+        render_kpi_cards(kpis)
         st.markdown("---")
         
-        # Enhanced branch cards
         if "branch_performance" in kpis and not kpis["branch_performance"].empty:
-            render_enhanced_branch_cards(kpis["branch_performance"])
+            render_performance_cards(kpis["branch_performance"])
         
-        # Quick insights
-        with st.expander("💡 Quick Insights", expanded=True):
-            insights = []
-            if "branch_performance" in kpis and not kpis["branch_performance"].empty:
-                bp = kpis["branch_performance"]
-                best_sales = bp["SalesPercent"].idxmax()
-                worst_sales = bp["SalesPercent"].idxmin()
-                best_sales_name = best_sales[0] if isinstance(best_sales, tuple) else best_sales
-                worst_sales_name = worst_sales[0] if isinstance(worst_sales, tuple) else worst_sales
-                
-                insights.extend([
-                    f"🥇 **Top Performer**: {best_sales_name} with {bp.loc[best_sales, 'SalesPercent']:.1f}% sales achievement",
-                    f"📉 **Needs Attention**: {worst_sales_name} with {bp.loc[worst_sales, 'SalesPercent']:.1f}% sales achievement",
-                    f"💰 **Total Revenue**: SAR {kpis.get('total_sales_actual', 0):,.0f} ({kpis.get('overall_sales_percent', 0):.1f}% of target)",
-                    f"🛍️ **Customer Traffic**: {kpis.get('total_nob_actual', 0):,.0f} baskets processed"
-                ])
-                
-                if kpis.get('total_sales_variance', 0) < 0:
-                    insights.append(f"⚠️ **Revenue Gap**: SAR {abs(kpis['total_sales_variance']):,.0f} below target")
-            
-            for insight in insights:
-                st.markdown(insight)
+        render_insights(kpis)
     
     with tab2:
-        st.markdown("### 📈 Enhanced Daily Trends")
+        st.markdown("### 📈 Daily Trends")
         
         # Time period selector
         period_options = {
@@ -878,63 +1047,46 @@ def main():
         
         selected_period = st.selectbox("📅 Time Period", options=list(period_options.keys()), index=2)
         
-        # Filter by time period
         if period_options[selected_period] and "Date" in df_filtered.columns:
             cutoff_date = df_filtered["Date"].max() - timedelta(days=period_options[selected_period])
             trend_df = df_filtered[df_filtered["Date"] >= cutoff_date].copy()
         else:
             trend_df = df_filtered.copy()
         
-        # Create enhanced trend charts
-        trend_tabs = st.tabs(["💰 Sales Trends", "🛍️ Basket Trends", "💎 Value Trends"])
+        trend_tabs = st.tabs(["💰 Sales", "🛍️ Baskets", "💎 Value"])
         
         with trend_tabs[0]:
             if not trend_df.empty and "SalesActual" in trend_df.columns:
-                fig_sales = create_enhanced_trend_chart(
-                    trend_df, "SalesActual", "SalesTarget", "Daily Sales Performance"
-                )
+                fig_sales = create_modern_trend_chart(trend_df, "SalesActual", "SalesTarget", "Daily Sales Performance")
                 st.plotly_chart(fig_sales, use_container_width=True, config={"displayModeBar": False})
                 
-                # Performance percentage chart
                 if "SalesTarget" in trend_df.columns:
-                    fig_sales_perf = create_performance_percentage_chart(
-                        trend_df, "SalesActual", "SalesTarget", "Sales"
-                    )
+                    fig_sales_perf = create_performance_chart(trend_df, "SalesActual", "SalesTarget", "Sales")
                     st.plotly_chart(fig_sales_perf, use_container_width=True, config={"displayModeBar": False})
             else:
-                st.info("No sales data available for the selected period.")
+                st.info("No sales data available.")
         
         with trend_tabs[1]:
             if not trend_df.empty and "NOBActual" in trend_df.columns:
-                fig_nob = create_enhanced_trend_chart(
-                    trend_df, "NOBActual", "NOBTarget", "Daily Basket Count Performance"
-                )
+                fig_nob = create_modern_trend_chart(trend_df, "NOBActual", "NOBTarget", "Daily Basket Count")
                 st.plotly_chart(fig_nob, use_container_width=True, config={"displayModeBar": False})
                 
-                # Performance percentage chart
                 if "NOBTarget" in trend_df.columns:
-                    fig_nob_perf = create_performance_percentage_chart(
-                        trend_df, "NOBActual", "NOBTarget", "NOB"
-                    )
+                    fig_nob_perf = create_performance_chart(trend_df, "NOBActual", "NOBTarget", "NOB")
                     st.plotly_chart(fig_nob_perf, use_container_width=True, config={"displayModeBar": False})
             else:
-                st.info("No basket data available for the selected period.")
+                st.info("No basket data available.")
         
         with trend_tabs[2]:
             if not trend_df.empty and "ABVActual" in trend_df.columns:
-                fig_abv = create_enhanced_trend_chart(
-                    trend_df, "ABVActual", "ABVTarget", "Average Basket Value Performance"
-                )
+                fig_abv = create_modern_trend_chart(trend_df, "ABVActual", "ABVTarget", "Average Basket Value")
                 st.plotly_chart(fig_abv, use_container_width=True, config={"displayModeBar": False})
                 
-                # Performance percentage chart
                 if "ABVTarget" in trend_df.columns:
-                    fig_abv_perf = create_performance_percentage_chart(
-                        trend_df, "ABVActual", "ABVTarget", "ABV"
-                    )
+                    fig_abv_perf = create_performance_chart(trend_df, "ABVActual", "ABVTarget", "ABV")
                     st.plotly_chart(fig_abv_perf, use_container_width=True, config={"displayModeBar": False})
             else:
-                st.info("No basket value data available for the selected period.")
+                st.info("No basket value data available.")
     
     with tab3:
         st.markdown("### 🎯 Performance Analysis")
@@ -943,22 +1095,18 @@ def main():
         
         with col1:
             if "branch_performance" in kpis and not kpis["branch_performance"].empty:
-                # Create radar chart
-                fig_radar = create_branch_comparison_radar(kpis["branch_performance"])
+                fig_radar = create_radar_chart(kpis["branch_performance"])
                 st.plotly_chart(fig_radar, use_container_width=True, config={"displayModeBar": False})
         
         with col2:
-            # Performance matrix
             st.markdown("#### Performance Matrix")
             if "branch_performance" in kpis and not kpis["branch_performance"].empty:
                 bp = kpis["branch_performance"].copy()
                 
-                # Create performance matrix
                 matrix_data = []
                 for branch in bp.index:
-                    branch_name = branch[0] if isinstance(branch, tuple) else branch
                     row = {
-                        "Branch": branch_name,
+                        "Branch": str(branch),
                         "Sales %": bp.loc[branch, "SalesPercent"],
                         "NOB %": bp.loc[branch, "NOBPercent"],
                         "ABV %": bp.loc[branch, "ABVPercent"],
@@ -970,55 +1118,16 @@ def main():
                     }
                     matrix_data.append(row)
                 
-                matrix_df = pd.DataFrame(matrix_data)
-                matrix_df = matrix_df.round(1)
-                
-                # Style the dataframe
+                matrix_df = pd.DataFrame(matrix_data).round(1)
                 st.dataframe(
                     matrix_df.style.background_gradient(
                         subset=["Sales %", "NOB %", "ABV %", "Overall"],
                         cmap="RdYlGn",
                         vmin=70,
                         vmax=110
-                    ).format({
-                        "Sales %": "{:.1f}%",
-                        "NOB %": "{:.1f}%",
-                        "ABV %": "{:.1f}%",
-                        "Overall": "{:.1f}%"
-                    }),
+                    ),
                     use_container_width=True
                 )
-        
-        # Trend analysis
-        st.markdown("#### 📊 Trend Analysis")
-        if "Date" in df_filtered.columns and len(df_filtered) > 1:
-            # Calculate weekly trends
-            df_filtered["Week"] = df_filtered["Date"].dt.isocalendar().week
-            weekly_trends = df_filtered.groupby(["Week", "BranchName"]).agg({
-                "SalesActual": "sum",
-                "NOBActual": "sum",
-                "ABVActual": "mean"
-            }).reset_index()
-            
-            # Show trend direction
-            trend_summary = []
-            for branch in selected_branches:
-                branch_data = weekly_trends[weekly_trends["BranchName"] == branch].sort_values("Week")
-                if len(branch_data) >= 2:
-                    sales_trend = "📈" if branch_data["SalesActual"].iloc[-1] > branch_data["SalesActual"].iloc[0] else "📉"
-                    nob_trend = "📈" if branch_data["NOBActual"].iloc[-1] > branch_data["NOBActual"].iloc[0] else "📉"
-                    abv_trend = "📈" if branch_data["ABVActual"].iloc[-1] > branch_data["ABVActual"].iloc[0] else "📉"
-                    
-                    trend_summary.append({
-                        "Branch": branch,
-                        "Sales Trend": sales_trend,
-                        "Baskets Trend": nob_trend,
-                        "Value Trend": abv_trend
-                    })
-            
-            if trend_summary:
-                trend_df = pd.DataFrame(trend_summary)
-                st.dataframe(trend_df, use_container_width=True)
     
     with tab4:
         st.markdown("### 📤 Export Data")
@@ -1026,13 +1135,12 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            # Excel export
             if not df_filtered.empty:
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
                     df_filtered.to_excel(writer, sheet_name="Raw Data", index=False)
-                    if "branch_performance" in kpis and not kpis["branch_performance"].empty:
-                        kpis["branch_performance"].to_excel(writer, sheet_name="Branch Summary")
+                    if "branch_performance" in kpis:
+                        kpis["branch_performance"].to_excel(writer, sheet_name="Summary")
                 
                 st.download_button(
                     "📊 Download Excel Report",
@@ -1043,7 +1151,6 @@ def main():
                 )
         
         with col2:
-            # CSV export
             if not df_filtered.empty:
                 csv_data = df_filtered.to_csv(index=False)
                 st.download_button(
@@ -1053,24 +1160,12 @@ def main():
                     mime="text/csv",
                     use_container_width=True
                 )
-        
-        # Data summary
-        st.markdown("#### 📋 Data Summary")
-        summary_data = {
-            "Total Records": len(df_filtered),
-            "Date Range": f"{df_filtered['Date'].min().date()} to {df_filtered['Date'].max().date()}" if "Date" in df_filtered.columns else "N/A",
-            "Branches": len(selected_branches),
-            "Total Sales": f"SAR {kpis.get('total_sales_actual', 0):,.0f}",
-            "Total Baskets": f"{kpis.get('total_nob_actual', 0):,.0f}",
-            "Avg Basket Value": f"SAR {kpis.get('avg_abv_actual', 0):,.2f}"
-        }
-        
-        for key, value in summary_data.items():
-            st.metric(key, value)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
         st.error(f"❌ Application Error: {str(e)}")
-        st.info("Please refresh the page or contact support if the issue persists.")
+        st.info("Please refresh the page if the issue persists.")
