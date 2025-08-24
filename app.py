@@ -1,1690 +1,348 @@
-# Enhanced Alkhair Family Market Dashboard - Single Source
-# Beautiful modern dashboard with glassmorphism design
+"""
+Streamlit Dashboard — Google Sheets (Published URL)
+- Paste your Google Sheets *published-to-web* URL (the one ending with /pubhtml).
+- The app auto-converts it to a downloadable XLSX and loads all sheets.
+- Generic KPIs + filters (date/branch) and a couple of charts.
+- Ready to deploy from GitHub → Streamlit Cloud.
+
+Author: ChatGPT (for Jaseer)
+"""
+
+from __future__ import annotations
 
 import io
 import re
-from datetime import datetime, date, timedelta
-from typing import List, Optional, Dict, Tuple, Any
-from dataclasses import dataclass
+import time
+import json
+import math
+import typing as t
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
+import requests
 import streamlit as st
-import streamlit.components.v1 as components
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import plotly.express as px
 
-# =========================
-# CONFIGURATION
-# =========================
-@dataclass
-class Config:
-    """Application configuration settings"""
-    PAGE_TITLE = "Alkhair Family Market — Executive Dashboard"
-    LAYOUT = "wide"
-    REFRESH_MINUTES = 1
-    
-    # Single data source
-    DATA_SOURCE_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQG7boLWl2bNLCPR05NXv6EFpPPcFfXsiXPQ7rAGYr3q8Nkc2Ijg8BqEwVofcMLSg/pub?output=csv"
-    
-    # Comprehensive column aliases
-    COLUMN_MAPPINGS = {
-        "Date": ["date", "bill_date", "txn_date", "invoice_date", "posting_date", "transaction_date", "sale_date", "entry_date"],
-        "Store": ["store", "branch", "location", "shop", "outlet", "store_name", "branch_name"],
-        "Sales": ["sales", "amount", "net_sales", "revenue", "netamount", "net_amount", "actual_sales", "sale_amount", "total_sales", "bill_amount"],
-        "TargetSales": ["target_sales", "target", "sales_target", "budget_sales", "planned_sales", "target_amount"],
-        "COGS": ["cogs", "cost", "purchase_cost", "cost_of_goods", "cost_of_sales", "cost_amount"],
-        "Qty": ["qty", "quantity", "qty_sold", "quantity_sold", "units", "pcs", "pieces", "units_sold", "qnty", "qnt", "qty.", "total_qty"],
-        "Tickets": ["tickets", "bills", "invoice_count", "transactions", "bills_count", "baskets", "no_of_baskets", "bill_count", "receipt_count"],
-        "Category": ["category", "cat", "product_category", "item_category", "type"],
-        "Item": ["item", "product", "sku", "item_name", "product_name", "description", "product_desc"],
-        "InventoryQty": ["inventoryqty", "inventory_qty", "stock_qty", "stockqty", "stock_quantity", "current_stock"],
-        "InventoryValue": ["inventoryvalue", "inventory_value", "stock_value", "stockvalue", "inventory_amount"],
-        "BankBalance": ["bank_balance", "bank", "bank_amount", "bankbalance", "account_balance"],
-        "CashBalance": ["cash_balance", "cash", "cash_amount", "cashbalance", "petty_cash"],
-        "Expenses": ["expenses", "operating_expenses", "opex", "costs", "expenditure", "expense_amount"],
-        "CustomerCount": ["customer_count", "customers", "footfall", "visitors", "customer_visits"],
-        "Supplier": ["supplier", "vendor", "supplier_name", "vendor_name"],
-        "PaymentMethod": ["payment_method", "payment_type", "payment", "pay_method"],
-        "Employee": ["employee", "staff", "cashier", "user", "operator", "salesperson"],
-        "Discount": ["discount", "discount_amount", "discount_value", "promo", "promotion"],
-        "Tax": ["tax", "vat", "tax_amount", "sales_tax"],
-        "UnitPrice": ["unit_price", "price", "rate", "selling_price", "sp", "item_price"],
-        "UnitCost": ["unit_cost", "cost_price", "cp", "purchase_price"]
-    }
-
-config = Config()
-
-# Page setup
-st.set_page_config(
-    page_title=config.PAGE_TITLE,
-    layout=config.LAYOUT,
-    initial_sidebar_state="collapsed",
+# ----------------------------
+# Configuration (edit if you like)
+# ----------------------------
+APP_TITLE = "AlKhair Supermarket — Daily Dashboard"
+COMPANY_NAME = "AlKhair Supermarket"
+DEFAULT_PUBLISHED_URL = (
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vQG7boLWl2bNLCPR05NXv6EFpPPcFfXsiXPQ7rAGYr3q8Nkc2Ijg8BqEwVofcMLSg/pubhtml"
 )
 
-# =========================
-# BEAUTIFUL STYLING
-# =========================
-def apply_stunning_css():
-    """Apply beautiful modern CSS with glassmorphism effects"""
-    st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
-    
-    :root {
-        --primary: #3b82f6;
-        --secondary: #8b5cf6;
-        --success: #10b981;
-        --warning: #f59e0b;
-        --danger: #ef4444;
-        --dark: #1e293b;
-        --light: #f8fafc;
-        --white: #ffffff;
-        --text-primary: #1f2937;
-        --text-secondary: #6b7280;
-        --text-muted: #9ca3af;
-        --border: rgba(203, 213, 225, 0.3);
-        --glass: rgba(255, 255, 255, 0.25);
-        --glass-border: rgba(255, 255, 255, 0.18);
-    }
-    
-    /* Global Styles */
-    html, body, [data-testid="stAppViewContainer"] {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 25%, #89f7fe 50%, #66a6ff 75%, #667eea 100%);
-        background-size: 400% 400%;
-        animation: gradientShift 15s ease infinite;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        color: var(--text-primary);
-    }
-    
-    @keyframes gradientShift {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
-    }
-    
-    .main .block-container {
-        padding: 2rem 2rem 3rem 2rem;
-        max-width: 1400px;
-    }
-    
-    /* Glassmorphism Header */
-    .hero-header {
-        background: rgba(255, 255, 255, 0.15);
-        backdrop-filter: blur(20px);
-        border: 1px solid var(--glass-border);
-        border-radius: 24px;
-        padding: 32px;
-        margin: -1rem -1rem 3rem -1rem;
-        color: white;
-        position: relative;
-        overflow: hidden;
-        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-    }
-    
-    .hero-header::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
-        pointer-events: none;
-    }
-    
-    .hero-content {
-        position: relative;
-        z-index: 1;
-    }
-    
-    /* Beautiful Metric Cards */
-    [data-testid="metric-container"] {
-        background: rgba(255, 255, 255, 0.95) !important;
-        backdrop-filter: blur(20px) !important;
-        border: 1px solid rgba(255, 255, 255, 0.3) !important;
-        border-radius: 20px !important;
-        padding: 28px 24px !important;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1) !important;
-        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        position: relative !important;
-        overflow: hidden !important;
-        margin: 12px 0 !important;
-    }
-    
-    [data-testid="metric-container"]:hover {
-        transform: translateY(-8px) scale(1.02) !important;
-        box-shadow: 0 32px 64px rgba(0, 0, 0, 0.15) !important;
-        border-color: rgba(59, 130, 246, 0.4) !important;
-    }
-    
-    [data-testid="metric-container"]::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
-        background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 50%, var(--success) 100%);
-        background-size: 200% 100%;
-        animation: shimmer 3s ease-in-out infinite;
-    }
-    
-    @keyframes shimmer {
-        0%, 100% { background-position: -200% 0; }
-        50% { background-position: 200% 0; }
-    }
-    
-    /* Enhanced Metric Styling */
-    [data-testid="metric-container"] [data-testid="metric-value"] {
-        font-size: 2.5rem !important;
-        font-weight: 900 !important;
-        color: var(--text-primary) !important;
-        line-height: 1 !important;
-        margin: 12px 0 8px 0 !important;
-        background: linear-gradient(135deg, var(--primary), var(--secondary));
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-    }
-    
-    [data-testid="metric-container"] [data-testid="metric-label"] {
-        font-size: 0.95rem !important;
-        font-weight: 700 !important;
-        color: var(--text-secondary) !important;
-        text-transform: none !important;
-        letter-spacing: 0.02em !important;
-        margin-bottom: 8px !important;
-    }
-    
-    [data-testid="metric-container"] [data-testid="metric-delta"] {
-        font-size: 0.85rem !important;
-        font-weight: 600 !important;
-        padding: 6px 12px !important;
-        border-radius: 12px !important;
-        margin-top: 8px !important;
-        backdrop-filter: blur(10px);
-    }
-    
-    /* Tab Navigation */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background: rgba(255, 255, 255, 0.9);
-        backdrop-filter: blur(20px);
-        border-radius: 16px;
-        padding: 8px;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        margin: 2rem 0;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        height: 56px;
-        padding: 14px 28px;
-        background: transparent;
-        border-radius: 12px;
-        color: var(--text-secondary);
-        font-weight: 600;
-        font-size: 0.95rem;
-        border: none;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .stTabs [data-baseweb="tab"]:hover {
-        background: rgba(59, 130, 246, 0.1);
-        color: var(--primary);
-        transform: translateY(-2px);
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background: var(--white) !important;
-        color: var(--text-primary) !important;
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15) !important;
-        border: 1px solid rgba(59, 130, 246, 0.2) !important;
-        transform: translateY(-2px);
-    }
-    
-    .stTabs [aria-selected="true"]::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 3px;
-        background: linear-gradient(90deg, var(--primary), var(--secondary));
-    }
-    
-    /* Chart Containers */
-    .stPlotlyChart > div {
-        background: rgba(255, 255, 255, 0.95) !important;
-        backdrop-filter: blur(20px) !important;
-        border-radius: 20px !important;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1) !important;
-        padding: 24px !important;
-        border: 1px solid rgba(255, 255, 255, 0.3) !important;
-        transition: all 0.3s ease !important;
-        margin: 16px 0 !important;
-    }
-    
-    .stPlotlyChart > div:hover {
-        box-shadow: 0 32px 64px rgba(0, 0, 0, 0.15) !important;
-        transform: translateY(-4px) !important;
-    }
-    
-    /* Section Headers */
-    .main h1, .main h2, .main h3 {
-        color: var(--white);
-        font-weight: 800;
-        margin: 2.5rem 0 1.5rem 0;
-        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        position: relative;
-    }
-    
-    .main h3 {
-        font-size: 1.4rem;
-        padding: 20px 0 16px 0;
-        position: relative;
-    }
-    
-    .main h3::after {
-        content: '';
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        width: 80px;
-        height: 3px;
-        background: linear-gradient(90deg, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.4));
-        border-radius: 2px;
-    }
-    
-    /* Filter Section */
-    .filter-section {
-        background: rgba(255, 255, 255, 0.9);
-        backdrop-filter: blur(20px);
-        border: 1px solid var(--glass-border);
-        border-radius: 20px;
-        padding: 24px;
-        margin: 24px 0;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-    }
-    
-    /* DataFrames */
-    .stDataFrame {
-        background: rgba(255, 255, 255, 0.95) !important;
-        border-radius: 16px !important;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1) !important;
-        border: 1px solid rgba(255, 255, 255, 0.3) !important;
-        overflow: hidden !important;
-        backdrop-filter: blur(20px);
-    }
-    
-    /* Buttons */
-    .stButton > button {
-        background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%) !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 14px !important;
-        padding: 14px 28px !important;
-        font-weight: 700 !important;
-        font-size: 0.95rem !important;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        box-shadow: 0 10px 25px rgba(59, 130, 246, 0.3) !important;
-        text-transform: uppercase !important;
-        letter-spacing: 0.05em !important;
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-3px) !important;
-        box-shadow: 0 20px 40px rgba(59, 130, 246, 0.4) !important;
-    }
-    
-    /* Download Buttons */
-    .stDownloadButton > button {
-        background: linear-gradient(135deg, var(--success) 0%, #22d3ee 100%) !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 14px !important;
-        padding: 14px 24px !important;
-        font-weight: 700 !important;
-        transition: all 0.3s ease !important;
-        box-shadow: 0 10px 25px rgba(16, 185, 129, 0.3) !important;
-        width: 100% !important;
-    }
-    
-    .stDownloadButton > button:hover {
-        transform: translateY(-3px) !important;
-        box-shadow: 0 20px 40px rgba(16, 185, 129, 0.4) !important;
-    }
-    
-    /* Input Elements */
-    .stSelectbox > div > div,
-    .stDateInput > div > div,
-    .stMultiSelect > div > div {
-        background: rgba(255, 255, 255, 0.9) !important;
-        border: 1px solid rgba(255, 255, 255, 0.3) !important;
-        border-radius: 14px !important;
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1) !important;
-        backdrop-filter: blur(10px) !important;
-    }
-    
-    /* Alert Cards */
-    .alert-card {
-        background: rgba(255, 255, 255, 0.9);
-        backdrop-filter: blur(20px);
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        border-radius: 16px;
-        padding: 20px 24px;
-        margin: 16px 0;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .alert-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
-        background: linear-gradient(90deg, var(--primary), var(--success));
-    }
-    
-    /* Performance Ring */
-    .performance-ring {
-        width: 140px;
-        height: 140px;
-        border-radius: 50%;
-        background: conic-gradient(from 0deg, var(--success) 0%, var(--success) var(--progress, 70%), rgba(255,255,255,0.3) var(--progress, 70%) 100%);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        position: relative;
-        margin: 0 auto 20px auto;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-    }
-    
-    .performance-ring::before {
-        content: '';
-        width: 100px;
-        height: 100px;
-        background: rgba(255, 255, 255, 0.95);
-        backdrop-filter: blur(10px);
-        border-radius: 50%;
-        position: absolute;
-        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
-    }
-    
-    .performance-score {
-        position: relative;
-        z-index: 1;
-        font-size: 1.8rem;
-        font-weight: 900;
-        color: var(--text-primary);
-        text-align: center;
-    }
-    
-    /* Insight Cards */
-    .insight-card {
-        background: rgba(255, 255, 255, 0.9);
-        backdrop-filter: blur(20px);
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        border-radius: 16px;
-        padding: 20px;
-        margin: 12px 0;
-        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
-        transition: all 0.3s ease;
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .insight-card:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
-    }
-    
-    .insight-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 4px;
-        height: 100%;
-        background: linear-gradient(180deg, var(--primary), var(--secondary));
-    }
-    
-    /* Status Badges */
-    .status-badge {
-        display: inline-flex;
-        align-items: center;
-        padding: 6px 12px;
-        border-radius: 20px;
-        font-size: 0.8rem;
-        font-weight: 600;
-        margin: 4px 8px 4px 0;
-        backdrop-filter: blur(10px);
-    }
-    
-    .status-success {
-        background: rgba(16, 185, 129, 0.1);
-        color: var(--success);
-        border: 1px solid rgba(16, 185, 129, 0.2);
-    }
-    
-    .status-warning {
-        background: rgba(245, 158, 11, 0.1);
-        color: var(--warning);
-        border: 1px solid rgba(245, 158, 11, 0.2);
-    }
-    
-    .status-danger {
-        background: rgba(239, 68, 68, 0.1);
-        color: var(--danger);
-        border: 1px solid rgba(239, 68, 68, 0.2);
-    }
-    
-    /* Floating Animation */
-    @keyframes float {
-        0%, 100% { transform: translateY(0px); }
-        50% { transform: translateY(-10px); }
-    }
-    
-    .floating {
-        animation: float 6s ease-in-out infinite;
-    }
-    
-    /* Hide Sidebar */
-    [data-testid='stSidebar'] { display: none !important; }
-    
-    /* Enhanced Typography */
-    .metric-title {
-        font-size: 1rem;
-        font-weight: 700;
-        color: var(--text-primary);
-        margin-bottom: 8px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-    
-    .metric-value-large {
-        font-size: 2.8rem;
-        font-weight: 900;
-        line-height: 1;
-        background: linear-gradient(135deg, var(--primary), var(--secondary));
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-    }
-    
-    .metric-subtitle {
-        font-size: 0.85rem;
-        color: var(--text-muted);
-        font-weight: 500;
-        margin-top: 4px;
-    }
-    
-    /* Responsive Design */
-    @media (max-width: 768px) {
-        .main .block-container {
-            padding: 1rem;
-        }
-        
-        .hero-header {
-            padding: 20px;
-            margin: -1rem -1rem 2rem -1rem;
-        }
-        
-        [data-testid="metric-container"] {
-            padding: 20px 16px !important;
-        }
-        
-        [data-testid="metric-container"] [data-testid="metric-value"] {
-            font-size: 2rem !important;
-        }
-    }
-    </style>
-    """, unsafe_allow_html=True)
+# ----------------------------
+# Small helpers
+# ----------------------------
 
-# =========================
-# DATA PROCESSING
-# =========================
-class DataProcessor:
-    """Handles all data processing operations"""
-    
-    @staticmethod
-    def clean_numeric(value: Any) -> float:
-        """Convert various formats to numeric values"""
-        if isinstance(value, (int, float, np.number)):
-            return float(value)
-        if value is None or (isinstance(value, str) and not value.strip()):
-            return np.nan
-        
-        s = str(value).strip()
-        s = re.sub(r'[^\d\-\.\,()]', '', s)
-        
-        negative = s.startswith('(') and s.endswith(')')
-        if negative:
-            s = s[1:-1]
-        
-        s = s.replace(',', '')
-        
+def _to_xlsx_download_url(url: str) -> str:
+    """Convert a Google Sheets *published* URL to an XLSX download URL.
+    Supports links of the form /d/e/{id}/pubhtml → /d/e/{id}/pub?output=xlsx.
+    """
+    if "docs.google.com/spreadsheets/d/e/" in url:
+        return re.sub(r"/pubhtml(.*)$", "/pub?output=xlsx", url.strip())
+    return url
+
+
+def _human(n: float | int | None) -> str:
+    if n is None or (isinstance(n, float) and (math.isnan(n) or math.isinf(n))):
+        return "–"
+    try:
+        n = float(n)
+    except Exception:
+        return str(n)
+    absn = abs(n)
+    if absn >= 1_000_000_000:
+        return f"{n/1_000_000_000:.2f}B"
+    if absn >= 1_000_000:
+        return f"{n/1_000_000:.2f}M"
+    if absn >= 1_000:
+        return f"{n/1_000:.2f}K"
+    return f"{n:,.2f}"
+
+
+def _safe_numeric(s: pd.Series) -> pd.Series:
+    return pd.to_numeric(s, errors="coerce")
+
+
+def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
+    d = df.copy()
+    d.columns = [re.sub(r"\s+", " ", str(c)).strip() for c in d.columns]
+    # Create a lookup map (lowercase, no spaces/punct)
+    return d
+
+
+def _col_finder(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    cols_norm = {re.sub(r"[^a-z0-9]", "", str(c).lower()): c for c in df.columns}
+    for want in candidates:
+        key = re.sub(r"[^a-z0-9]", "", want.lower())
+        # exact key
+        if key in cols_norm:
+            return cols_norm[key]
+        # partial contains match
+        for k, orig in cols_norm.items():
+            if key in k:
+                return orig
+    return None
+
+
+@st.cache_data(show_spinner=False)
+def fetch_workbook(published_url: str) -> tuple[list[str], dict[str, pd.DataFrame], str]:
+    """Download the XLSX for a published Google Sheet and parse all sheets.
+
+    Returns: (sheet_names, dataframes_by_sheet, last_modified_str)
+    """
+    dl = _to_xlsx_download_url(published_url)
+
+    # Grab headers for Last-Modified
+    last_modified = ""
+    try:
+        head = requests.head(dl, timeout=20)
+        last_modified = head.headers.get("Last-Modified", "")
+    except Exception:
+        pass
+
+    r = requests.get(dl, timeout=60)
+    r.raise_for_status()
+    bio = io.BytesIO(r.content)
+
+    xls = pd.ExcelFile(bio)
+    sheets = {}
+    for sn in xls.sheet_names:
         try:
-            val = float(s)
-            return -val if negative else val
-        except:
-            return np.nan
-    
-    @staticmethod
-    def find_column(df: pd.DataFrame, aliases: List[str]) -> Optional[str]:
-        """Find column name from list of possible aliases"""
-        columns_lower = {col.lower().strip(): col for col in df.columns}
-        
-        for alias in aliases:
-            if alias in columns_lower:
-                return columns_lower[alias]
-        
-        for col_lower, col_original in columns_lower.items():
-            for alias in aliases:
-                if alias in col_lower:
-                    return col_original
-        
-        return None
-    
-    @classmethod
-    def standardize_dataframe(cls, df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, str]]:
-        """Standardize column names and data types"""
-        if df.empty:
-            return df.copy(), {}
-        
-        df = df.copy()
-        mapping = {}
-        
-        for target_col, aliases in config.COLUMN_MAPPINGS.items():
-            source_col = cls.find_column(df, aliases)
-            
-            if source_col:
-                mapping[target_col] = source_col
-                df.rename(columns={source_col: target_col}, inplace=True)
-                
-                if target_col == "Date":
-                    df[target_col] = pd.to_datetime(df[target_col], errors='coerce', dayfirst=True)
-                elif target_col in ["Sales", "TargetSales", "COGS", "Qty", "Tickets", "InventoryQty", 
-                                  "InventoryValue", "BankBalance", "CashBalance", "Expenses", "CustomerCount",
-                                  "Discount", "Tax", "UnitPrice", "UnitCost"]:
-                    df[target_col] = df[target_col].apply(cls.clean_numeric)
-                    if target_col in ["Sales", "Qty"]:
-                        df[target_col] = df[target_col].fillna(0)
-            else:
-                mapping[target_col] = "(missing)"
-                if target_col in ["Sales", "Qty"]:
-                    df[target_col] = 0
-                else:
-                    df[target_col] = np.nan
-        
-        # Calculate derived metrics
-        if df["COGS"].notna().any():
-            df["GrossProfit"] = df["Sales"] - df["COGS"]
-            df["GrossMargin"] = np.where(df["Sales"] > 0, (df["GrossProfit"] / df["Sales"]) * 100, 0)
-        else:
-            df["GrossProfit"] = np.nan
-            df["GrossMargin"] = np.nan
-        
-        if df["TargetSales"].notna().any():
-            df["SalesVariance"] = df["Sales"] - df["TargetSales"]
-            df["SalesVariancePct"] = np.where(df["TargetSales"] > 0, 
-                                           (df["SalesVariance"] / df["TargetSales"]) * 100, 0)
-        else:
-            df["SalesVariance"] = np.nan
-            df["SalesVariancePct"] = np.nan
-        
-        df["Store"] = df["Store"].fillna("Unknown").astype(str).str.strip()
-        
-        return df, mapping
+            df = xls.parse(sn)
+            # Drop fully-empty rows/cols
+            df = df.dropna(how="all").dropna(axis=1, how="all")
+            if not df.empty:
+                sheets[sn] = df
+        except Exception:
+            continue
 
-# =========================
-# ANALYTICS ENGINE
-# =========================
-class AnalyticsEngine:
-    """Advanced analytics and KPI calculations"""
-    
-    @staticmethod
-    def calculate_kpis(df: pd.DataFrame) -> Dict[str, Any]:
-        """Calculate comprehensive KPIs"""
-        kpis = {}
-        
-        # Core metrics
-        kpis["total_sales"] = float(df["Sales"].sum())
-        kpis["total_tickets"] = float(df["Tickets"].sum()) if df["Tickets"].notna().any() else 0
-        kpis["total_qty"] = float(df["Qty"].sum())
-        kpis["unique_customers"] = float(df["CustomerCount"].sum()) if df["CustomerCount"].notna().any() else 0
-        
-        # Financial metrics
-        kpis["target_sales"] = float(df["TargetSales"].sum()) if df["TargetSales"].notna().any() else 0
-        kpis["sales_variance"] = kpis["total_sales"] - kpis["target_sales"]
-        kpis["sales_variance_pct"] = (kpis["sales_variance"] / kpis["target_sales"] * 100) if kpis["target_sales"] > 0 else 0
-        
-        kpis["gross_profit"] = float(df["GrossProfit"].sum()) if df["GrossProfit"].notna().any() else 0
-        kpis["gross_margin"] = (kpis["gross_profit"] / kpis["total_sales"] * 100) if kpis["total_sales"] > 0 else 0
-        
-        kpis["total_discount"] = float(df["Discount"].sum()) if df["Discount"].notna().any() else 0
-        kpis["discount_rate"] = (kpis["total_discount"] / kpis["total_sales"] * 100) if kpis["total_sales"] > 0 else 0
-        
-        # Operational metrics
-        kpis["avg_basket"] = kpis["total_sales"] / kpis["total_tickets"] if kpis["total_tickets"] > 0 else 0
-        kpis["items_per_basket"] = kpis["total_qty"] / kpis["total_tickets"] if kpis["total_tickets"] > 0 else 0
-        kpis["conversion_rate"] = kpis["items_per_basket"]  # Items per transaction
-        
-        # Time-based metrics
-        if df["Date"].notna().any():
-            unique_days = df["Date"].dt.date.nunique()
-            kpis["days_count"] = unique_days
-            kpis["avg_daily_sales"] = kpis["total_sales"] / unique_days if unique_days > 0 else 0
-            kpis["avg_daily_tickets"] = kpis["total_tickets"] / unique_days if unique_days > 0 else 0
-            
-            # Growth calculation (compare first half vs second half of period)
-            if unique_days > 7:
-                dates_sorted = df["Date"].dt.date.unique()
-                dates_sorted = sorted(dates_sorted)
-                mid_point = len(dates_sorted) // 2
-                
-                first_half = df[df["Date"].dt.date <= dates_sorted[mid_point]]["Sales"].sum()
-                second_half = df[df["Date"].dt.date > dates_sorted[mid_point]]["Sales"].sum()
-                
-                if first_half > 0:
-                    kpis["growth_rate"] = ((second_half - first_half) / first_half * 100)
-                else:
-                    kpis["growth_rate"] = 0
-            else:
-                kpis["growth_rate"] = 0
-        else:
-            kpis["days_count"] = 0
-            kpis["avg_daily_sales"] = 0
-            kpis["avg_daily_tickets"] = 0
-            kpis["growth_rate"] = 0
-        
-        # Liquidity metrics
-        kpis["bank_balance"] = float(df["BankBalance"].iloc[-1]) if df["BankBalance"].notna().any() else 0
-        kpis["cash_balance"] = float(df["CashBalance"].iloc[-1]) if df["CashBalance"].notna().any() else 0
-        kpis["total_liquidity"] = kpis["bank_balance"] + kpis["cash_balance"]
-        
-        # Performance score
-        kpis["performance_score"] = AnalyticsEngine.calculate_performance_score(kpis)
-        
-        return kpis
-    
-    @staticmethod
-    def calculate_performance_score(kpis: Dict[str, Any]) -> float:
-        """Calculate weighted performance score"""
-        score = 0
-        weights = 0
-        
-        # Sales performance (30%)
-        if kpis.get("target_sales", 0) > 0:
-            target_ratio = min(kpis["total_sales"] / kpis["target_sales"], 1.5)
-            score += target_ratio * 30
-            weights += 30
-        elif kpis.get("total_sales", 0) > 0:
-            score += 25  # Base score for having sales
-            weights += 30
-        
-        # Profitability (25%)
-        if kpis.get("gross_margin", 0) > 0:
-            margin_score = min(kpis["gross_margin"] / 30, 1.0)
-            score += margin_score * 25
-            weights += 25
-        
-        # Growth (20%)
-        if abs(kpis.get("growth_rate", 0)) > 0:
-            growth_score = min(abs(kpis["growth_rate"]) / 10, 1.0)
-            if kpis["growth_rate"] > 0:
-                score += growth_score * 20
-            else:
-                score += growth_score * 10  # Partial credit for activity
-            weights += 20
-        
-        # Basket metrics (15%)
-        if kpis.get("avg_basket", 0) > 0:
-            basket_score = min(kpis["avg_basket"] / 50, 1.0)
-            score += basket_score * 15
-            weights += 15
-        
-        # Operational efficiency (10%)
-        if kpis.get("items_per_basket", 0) > 0:
-            efficiency_score = min(kpis["items_per_basket"] / 3, 1.0)
-            score += efficiency_score * 10
-            weights += 10
-        
-        return (score / weights * 100) if weights > 0 else 0
+    return list(sheets.keys()), sheets, last_modified
 
-# =========================
-# VISUALIZATION ENGINE
-# =========================
-class VisualizationEngine:
-    """Create stunning visualizations"""
-    
-    @staticmethod
-    def create_sales_trend_chart(df: pd.DataFrame) -> go.Figure:
-        """Beautiful sales trend with multiple metrics"""
-        if not df["Date"].notna().any():
-            return go.Figure()
-        
-        daily_data = df.groupby(df["Date"].dt.date).agg({
-            "Sales": "sum",
-            "Tickets": "sum",
-            "Qty": "sum",
-            "GrossProfit": "sum"
-        }).reset_index()
-        
-        daily_data["AvgBasket"] = daily_data["Sales"] / daily_data["Tickets"]
-        daily_data["ItemsPerBasket"] = daily_data["Qty"] / daily_data["Tickets"]
-        
-        fig = make_subplots(
-            rows=2, cols=1,
-            subplot_titles=('Sales Performance', 'Basket Analytics'),
-            vertical_spacing=0.15,
-            specs=[[{"secondary_y": True}], [{"secondary_y": True}]]
-        )
-        
-        # Sales bars
-        fig.add_trace(
-            go.Bar(
-                x=daily_data["Date"],
-                y=daily_data["Sales"],
-                name="Daily Sales",
-                marker=dict(
-                    color=daily_data["Sales"],
-                    colorscale="Blues",
-                    showscale=False
-                ),
-                text=daily_data["Sales"].round(0),
-                textposition="outside"
-            ),
-            row=1, col=1
-        )
-        
-        # Gross profit line
-        fig.add_trace(
-            go.Scatter(
-                x=daily_data["Date"],
-                y=daily_data["GrossProfit"],
-                name="Gross Profit",
-                line=dict(color="#10b981", width=4),
-                mode="lines+markers",
-                marker=dict(size=8)
-            ),
-            row=1, col=1, secondary_y=True
-        )
-        
-        # Average basket
-        fig.add_trace(
-            go.Scatter(
-                x=daily_data["Date"],
-                y=daily_data["AvgBasket"],
-                name="Avg Basket Size",
-                line=dict(color="#f59e0b", width=3),
-                mode="lines+markers",
-                fill="tonexty"
-            ),
-            row=2, col=1
-        )
-        
-        # Items per basket
-        fig.add_trace(
-            go.Scatter(
-                x=daily_data["Date"],
-                y=daily_data["ItemsPerBasket"],
-                name="Items per Basket",
-                line=dict(color="#8b5cf6", width=3),
-                mode="lines+markers"
-            ),
-            row=2, col=1, secondary_y=True
-        )
-        
-        fig.update_layout(
-            height=600,
-            showlegend=True,
-            legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="Inter", size=12)
-        )
-        
-        # Update axes
-        fig.update_xaxes(showgrid=True, gridcolor="rgba(255,255,255,0.2)")
-        fig.update_yaxes(showgrid=True, gridcolor="rgba(255,255,255,0.2)")
-        
-        return fig
-    
-    @staticmethod
-    def create_category_sunburst(df: pd.DataFrame) -> go.Figure:
-        """Create beautiful sunburst chart for categories and items"""
-        if not df["Category"].notna().any():
-            return go.Figure()
-        
-        # Prepare data for sunburst
-        category_data = df.groupby(["Category", "Item"])["Sales"].sum().reset_index()
-        category_data = category_data.sort_values("Sales", ascending=False)
-        
-        # Limit items per category for clarity
-        top_categories = category_data.groupby("Category")["Sales"].sum().nlargest(6).index
-        filtered_data = category_data[category_data["Category"].isin(top_categories)]
-        
-        # Create sunburst
-        fig = go.Figure(go.Sunburst(
-            labels=["Total"] + list(filtered_data["Category"].unique()) + list(filtered_data["Item"]),
-            parents=[""] + ["Total"] * len(filtered_data["Category"].unique()) + list(filtered_data["Category"]),
-            values=[filtered_data["Sales"].sum()] + list(filtered_data.groupby("Category")["Sales"].sum()) + list(filtered_data["Sales"]),
-            branchvalues="total",
-            hovertemplate="<b>%{label}</b><br>Sales: SAR %{value:,.0f}<br>Percentage: %{percentParent}<extra></extra>",
-            maxdepth=2
-        ))
-        
-        fig.update_layout(
-            title="Sales Distribution: Categories & Top Items",
-            font=dict(family="Inter", size=12),
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            height=500
-        )
-        
-        return fig
-    
-    @staticmethod
-    def create_performance_gauge(score: float) -> go.Figure:
-        """Create beautiful performance gauge"""
-        fig = go.Figure(go.Indicator(
-            mode="gauge+number+delta",
-            value=score,
-            title={"text": "Performance Score", "font": {"size": 20, "family": "Inter"}},
-            delta={"reference": 70, "increasing": {"color": "#10b981"}, "decreasing": {"color": "#ef4444"}},
-            gauge={
-                "axis": {"range": [None, 100], "tickwidth": 1, "tickcolor": "white"},
-                "bar": {"color": "#3b82f6"},
-                "bgcolor": "rgba(255,255,255,0.1)",
-                "borderwidth": 2,
-                "bordercolor": "white",
-                "steps": [
-                    {"range": [0, 50], "color": "rgba(239, 68, 68, 0.3)"},
-                    {"range": [50, 75], "color": "rgba(245, 158, 11, 0.3)"},
-                    {"range": [75, 100], "color": "rgba(16, 185, 129, 0.3)"}
-                ],
-                "threshold": {
-                    "line": {"color": "white", "width": 4},
-                    "thickness": 0.75,
-                    "value": 90
-                }
-            }
-        ))
-        
-        fig.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font={"color": "white", "family": "Inter"},
-            height=300
-        )
-        
-        return fig
 
-# =========================
-# TAB FUNCTIONS
-# =========================
-def render_dashboard_overview(df: pd.DataFrame, kpis: Dict[str, Any]):
-    """Render beautiful overview dashboard"""
-    
-    # Hero metrics section
-    st.markdown("### 💰 Financial Performance")
-    
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    with col1:
-        st.metric(
-            "💰 Total Sales",
-            f"SAR {kpis['total_sales']:,.0f}",
-            delta=f"Daily: SAR {kpis['avg_daily_sales']:,.0f}"
-        )
-    
-    with col2:
-        variance_delta = f"{kpis['sales_variance_pct']:+.1f}%" if kpis['target_sales'] > 0 else "No Target"
-        variance_color = "normal" if kpis['sales_variance_pct'] >= 0 else "inverse"
-        st.metric(
-            "🎯 vs Target", 
-            f"SAR {kpis['sales_variance']:,.0f}",
-            delta=variance_delta,
-            delta_color=variance_color
-        )
-    
-    with col3:
-        st.metric(
-            "💎 Gross Profit",
-            f"SAR {kpis['gross_profit']:,.0f}",
-            delta=f"Margin: {kpis['gross_margin']:.1f}%"
-        )
-    
-    with col4:
-        discount_color = "inverse" if kpis['discount_rate'] > 10 else "normal"
-        st.metric(
-            "🏷️ Discounts",
-            f"SAR {kpis['total_discount']:,.0f}",
-            delta=f"Rate: {kpis['discount_rate']:.1f}%",
-            delta_color=discount_color
-        )
-    
-    with col5:
-        growth_color = "normal" if kpis['growth_rate'] >= 0 else "inverse"
-        st.metric(
-            "📈 Growth",
-            f"{kpis['growth_rate']:+.1f}%",
-            delta="Period Growth",
-            delta_color=growth_color
-        )
-    
-    # Operational metrics
-    st.markdown("### 🛍️ Customer & Operations")
-    
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    with col1:
-        st.metric(
-            "🛒 Total Baskets",
-            f"{kpis['total_tickets']:,.0f}",
-            delta=f"Daily: {kpis['avg_daily_tickets']:.0f}"
-        )
-    
-    with col2:
-        st.metric(
-            "🎯 Avg Basket",
-            f"SAR {kpis['avg_basket']:.2f}",
-            delta="Per Transaction"
-        )
-    
-    with col3:
-        st.metric(
-            "📦 Items/Basket",
-            f"{kpis['items_per_basket']:.2f}",
-            delta="Conversion Rate"
-        )
-    
-    with col4:
-        st.metric(
-            "👥 Customers",
-            f"{kpis['unique_customers']:,.0f}",
-            delta="Total Served"
-        )
-    
-    with col5:
-        st.metric(
-            "📊 Days Active",
-            f"{kpis['days_count']}",
-            delta="Analysis Period"
-        )
-    
-    # Performance visualization
-    st.markdown("### 📈 Performance Analytics")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        if df["Date"].notna().any():
-            trend_chart = VisualizationEngine.create_sales_trend_chart(df)
-            st.plotly_chart(trend_chart, use_container_width=True)
-    
-    with col2:
-        # Performance gauge
-        gauge_chart = VisualizationEngine.create_performance_gauge(kpis["performance_score"])
-        st.plotly_chart(gauge_chart, use_container_width=True)
-        
-        # Key insights
-        st.markdown("""
-        <div class="insight-card">
-            <h4 style="margin:0 0 12px 0; color: var(--text-primary);">💡 Quick Insights</h4>
-        """, unsafe_allow_html=True)
-        
-        if kpis['performance_score'] >= 80:
-            st.markdown("🎉 **Excellent** performance across all metrics")
-        elif kpis['performance_score'] >= 60:
-            st.markdown("👍 **Good** performance with room for optimization")
-        else:
-            st.markdown("⚠️ **Focus needed** on key performance areas")
-        
-        if kpis['growth_rate'] > 5:
-            st.markdown(f"📈 Strong growth momentum: **+{kpis['growth_rate']:.1f}%**")
-        elif kpis['growth_rate'] < -5:
-            st.markdown(f"📉 Monitor declining trend: **{kpis['growth_rate']:.1f}%**")
-        
-        if kpis['items_per_basket'] > 2.5:
-            st.markdown(f"🛍️ Excellent cross-selling: **{kpis['items_per_basket']:.1f}** items/basket")
-        
-        st.markdown("</div>", unsafe_allow_html=True)
+def kpi_section(df: pd.DataFrame) -> dict[str, float]:
+    d = _normalize_cols(df)
 
-def render_analytics_tab(df: pd.DataFrame, kpis: Dict[str, Any]):
-    """Render detailed analytics"""
-    st.markdown("## 📊 Advanced Analytics")
-    
-    if df["Category"].notna().any():
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            # Category performance
-            category_sales = df.groupby("Category")["Sales"].sum().sort_values(ascending=False)
-            
-            fig = go.Figure(go.Bar(
-                y=category_sales.index,
-                x=category_sales.values,
-                orientation='h',
-                marker=dict(
-                    color=category_sales.values,
-                    colorscale="Viridis",
-                    showscale=True,
-                    colorbar=dict(title="Sales (SAR)")
-                ),
-                text=[f"SAR {val:,.0f}" for val in category_sales.values],
-                textposition="outside"
-            ))
-            
-            fig.update_layout(
-                title="Category Performance Ranking",
-                xaxis_title="Sales (SAR)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                paper_bgcolor="rgba(0,0,0,0)",
-                height=400,
-                font=dict(family="Inter")
+    date_col = _col_finder(d, ["date", "trans date", "sales date", "invoice date"])
+    if date_col:
+        d[date_col] = pd.to_datetime(d[date_col], errors="coerce", dayfirst=True)
+
+    sales_col = _col_finder(d, ["sales", "net sales", "amount", "total", "net amount"])
+    profit_col = _col_finder(d, ["profit", "gross profit", "gp"])
+    basket_col = _col_finder(d, ["baskets", "tickets", "orders", "invoices", "no of basket", "no of tickets"])
+
+    kpis: dict[str, float] = {"sales": np.nan, "profit": np.nan, "baskets": np.nan, "avg_ticket": np.nan}
+
+    if sales_col and sales_col in d:
+        d[sales_col] = _safe_numeric(d[sales_col])
+        kpis["sales"] = float(d[sales_col].sum())
+    if profit_col and profit_col in d:
+        d[profit_col] = _safe_numeric(d[profit_col])
+        kpis["profit"] = float(d[profit_col].sum())
+    if basket_col and basket_col in d:
+        d[basket_col] = _safe_numeric(d[basket_col])
+        kpis["baskets"] = float(d[basket_col].sum())
+
+    if not math.isnan(kpis["sales"]) and not math.isnan(kpis["baskets"]) and kpis["baskets"] != 0:
+        kpis["avg_ticket"] = kpis["sales"] / kpis["baskets"]
+
+    return kpis
+
+
+def apply_filters(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str | tuple]]:
+    d = _normalize_cols(df)
+
+    # Find columns
+    date_col = _col_finder(d, ["date", "trans date", "sales date", "invoice date"])
+    branch_col = _col_finder(d, ["branch", "store", "location"])
+
+    # Sidebar filters
+    flt_info: dict[str, t.Any] = {}
+
+    if date_col:
+        d[date_col] = pd.to_datetime(d[date_col], errors="coerce", dayfirst=True)
+        min_d = pd.to_datetime(d[date_col].min()) if not d.empty else None
+        max_d = pd.to_datetime(d[date_col].max()) if not d.empty else None
+        if pd.notna(min_d) and pd.notna(max_d):
+            st.sidebar.subheader("Date filter")
+            start, end = st.sidebar.date_input(
+                "Range", value=(min_d.date(), max_d.date()), min_value=min_d.date(), max_value=max_d.date()
             )
-            
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            # Sunburst chart
-            sunburst = VisualizationEngine.create_category_sunburst(df)
-            st.plotly_chart(sunburst, use_container_width=True)
-    
-    # Store comparison if multiple stores
-    if df["Store"].nunique() > 1:
-        st.markdown("### 🏪 Store Performance Matrix")
-        
-        store_analysis = df.groupby("Store").agg({
-            "Sales": "sum",
-            "Tickets": "sum",
-            "Qty": "sum",
-            "GrossProfit": "sum"
-        }).reset_index()
-        
-        store_analysis["AvgBasket"] = store_analysis["Sales"] / store_analysis["Tickets"]
-        store_analysis["GrossMargin"] = (store_analysis["GrossProfit"] / store_analysis["Sales"] * 100).round(1)
-        store_analysis["ItemsPerBasket"] = (store_analysis["Qty"] / store_analysis["Tickets"]).round(2)
-        
-        # Create heatmap-style comparison
-        fig = go.Figure()
-        
-        # Sales comparison
-        fig.add_trace(go.Bar(
-            x=store_analysis["Store"],
-            y=store_analysis["Sales"],
-            name="Sales",
-            marker_color="#3b82f6",
-            text=[f"SAR {val:,.0f}" for val in store_analysis["Sales"]],
-            textposition="outside"
-        ))
-        
-        fig.update_layout(
-            title="Store Sales Comparison",
-            xaxis_title="Store",
-            yaxis_title="Sales (SAR)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            height=400
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Store metrics table
-        display_stores = store_analysis.copy()
-        display_stores["Sales"] = display_stores["Sales"].apply(lambda x: f"SAR {x:,.0f}")
-        display_stores["GrossProfit"] = display_stores["GrossProfit"].apply(lambda x: f"SAR {x:,.0f}")
-        display_stores["AvgBasket"] = display_stores["AvgBasket"].apply(lambda x: f"SAR {x:.2f}")
-        
-        st.dataframe(display_stores, use_container_width=True, hide_index=True)
+            if start and end:
+                mask = (d[date_col] >= pd.to_datetime(start)) & (d[date_col] <= pd.to_datetime(end))
+                d = d.loc[mask]
+                flt_info["date_range"] = (str(start), str(end))
 
-def render_products_tab(df: pd.DataFrame):
-    """Render product analytics"""
-    st.markdown("## ⭐ Product Intelligence")
-    
-    if df["Item"].notna().any():
-        # Product analysis
-        product_analysis = df.groupby("Item").agg({
-            "Sales": "sum",
-            "Qty": "sum",
-            "Tickets": "sum",
-            "GrossProfit": "sum"
-        }).reset_index()
-        
-        product_analysis["AvgPrice"] = product_analysis["Sales"] / product_analysis["Qty"]
-        product_analysis["Frequency"] = product_analysis["Qty"] / product_analysis["Tickets"]
-        product_analysis["MarginPct"] = (product_analysis["GrossProfit"] / product_analysis["Sales"] * 100).round(1)
-        
-        # Analysis selector
-        col1, col2 = st.columns([3, 1])
-        
-        with col2:
-            analysis_type = st.selectbox(
-                "Analysis View",
-                ["🏆 Top Sellers", "💰 Most Profitable", "📈 Best Margins", "🔥 High Frequency"]
-            )
-        
-        with col1:
-            if "Top Sellers" in analysis_type:
-                display_data = product_analysis.sort_values("Sales", ascending=False).head(20)
-                chart_data = display_data.head(10)
-                
-                fig = go.Figure(go.Bar(
-                    x=chart_data["Sales"],
-                    y=chart_data["Item"].str[:30],
-                    orientation='h',
-                    marker=dict(
-                        color=chart_data["Sales"],
-                        colorscale="Blues",
-                        showscale=True
-                    ),
-                    text=[f"SAR {val:,.0f}" for val in chart_data["Sales"]],
-                    textposition="outside"
-                ))
-                
-                fig.update_layout(
-                    title="Top 10 Products by Sales",
-                    xaxis_title="Sales (SAR)",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    height=500
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            
-            elif "Most Profitable" in analysis_type:
-                display_data = product_analysis.sort_values("GrossProfit", ascending=False).head(20)
-                chart_data = display_data.head(10)
-                
-                fig = go.Figure(go.Bar(
-                    x=chart_data["GrossProfit"],
-                    y=chart_data["Item"].str[:30],
-                    orientation='h',
-                    marker=dict(
-                        color=chart_data["GrossProfit"],
-                        colorscale="Greens",
-                        showscale=True
-                    ),
-                    text=[f"SAR {val:,.0f}" for val in chart_data["GrossProfit"]],
-                    textposition="outside"
-                ))
-                
-                fig.update_layout(
-                    title="Top 10 Most Profitable Products",
-                    xaxis_title="Gross Profit (SAR)",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    height=500
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            
-            elif "Best Margins" in analysis_type:
-                display_data = product_analysis[product_analysis["MarginPct"] > 0].sort_values("MarginPct", ascending=False).head(20)
-                chart_data = display_data.head(10)
-                
-                fig = go.Figure(go.Bar(
-                    x=chart_data["MarginPct"],
-                    y=chart_data["Item"].str[:30],
-                    orientation='h',
-                    marker=dict(
-                        color=chart_data["MarginPct"],
-                        colorscale="Oranges",
-                        showscale=True
-                    ),
-                    text=[f"{val:.1f}%" for val in chart_data["MarginPct"]],
-                    textposition="outside"
-                ))
-                
-                fig.update_layout(
-                    title="Top 10 Products by Margin",
-                    xaxis_title="Gross Margin (%)",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    height=500
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            
-            else:  # High Frequency
-                display_data = product_analysis.sort_values("Frequency", ascending=False).head(20)
-                chart_data = display_data.head(10)
-                
-                fig = go.Figure(go.Bar(
-                    x=chart_data["Frequency"],
-                    y=chart_data["Item"].str[:30],
-                    orientation='h',
-                    marker=dict(
-                        color=chart_data["Frequency"],
-                        colorscale="Purples",
-                        showscale=True
-                    ),
-                    text=[f"{val:.2f}" for val in chart_data["Frequency"]],
-                    textposition="outside"
-                ))
-                
-                fig.update_layout(
-                    title="Top 10 High-Frequency Products",
-                    xaxis_title="Items per Basket",
-                    plot_bgcolor="rgba(0,0,0,0)",
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    height=500
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-        
-        # Product table
-        st.markdown("### 📋 Detailed Product Analysis")
-        
-        # Format display data
-        display_products = display_data.copy()
-        display_products["Sales"] = display_products["Sales"].apply(lambda x: f"SAR {x:,.0f}")
-        display_products["GrossProfit"] = display_products["GrossProfit"].apply(lambda x: f"SAR {x:,.0f}")
-        display_products["AvgPrice"] = display_products["AvgPrice"].apply(lambda x: f"SAR {x:.2f}")
-        display_products["Frequency"] = display_products["Frequency"].apply(lambda x: f"{x:.2f}")
-        
-        # Select relevant columns
-        cols_to_show = ["Item", "Sales", "Qty", "GrossProfit", "MarginPct", "AvgPrice", "Frequency"]
-        col_names = ["Product", "Sales", "Qty", "Profit", "Margin %", "Avg Price", "Frequency"]
-        
-        display_products = display_products[cols_to_show]
-        display_products.columns = col_names
-        
-        st.dataframe(display_products, use_container_width=True)
+    if branch_col and branch_col in d:
+        st.sidebar.subheader("Branch filter")
+        opts = ["All"] + sorted([x for x in d[branch_col].dropna().astype(str).unique()])
+        pick = st.sidebar.selectbox("Branch", opts)
+        if pick != "All":
+            d = d.loc[d[branch_col].astype(str) == pick]
+            flt_info["branch"] = pick
 
-def render_insights_tab(df: pd.DataFrame, kpis: Dict[str, Any]):
-    """Render AI insights and recommendations"""
-    st.markdown("## 💡 Business Intelligence & Recommendations")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.markdown("### 🎯 Performance Analysis")
-        
-        # Performance insights
-        insights = []
-        
-        # Sales performance
-        if kpis['sales_variance_pct'] > 10:
-            insights.append(("🎉 Outstanding Performance", f"Sales exceeded target by {kpis['sales_variance_pct']:.1f}%", "success"))
-        elif kpis['sales_variance_pct'] > 0:
-            insights.append(("✅ Target Achieved", f"Sales above target by {kpis['sales_variance_pct']:.1f}%", "success"))
-        elif kpis['sales_variance_pct'] > -10:
-            insights.append(("⚠️ Near Target", f"Sales {abs(kpis['sales_variance_pct']):.1f}% below target", "warning"))
-        else:
-            insights.append(("🔴 Action Required", f"Sales {abs(kpis['sales_variance_pct']):.1f}% below target", "danger"))
-        
-        # Profitability
-        if kpis['gross_margin'] > 30:
-            insights.append(("💰 Strong Margins", f"Gross margin at {kpis['gross_margin']:.1f}%", "success"))
-        elif kpis['gross_margin'] > 20:
-            insights.append(("📊 Healthy Margins", f"Gross margin at {kpis['gross_margin']:.1f}%", "success"))
-        else:
-            insights.append(("⚠️ Margin Concern", f"Low gross margin: {kpis['gross_margin']:.1f}%", "warning"))
-        
-        # Customer behavior
-        if kpis['items_per_basket'] > 3:
-            insights.append(("🛍️ Excellent Cross-selling", f"{kpis['items_per_basket']:.1f} items per basket", "success"))
-        elif kpis['items_per_basket'] > 2:
-            insights.append(("👍 Good Basket Size", f"{kpis['items_per_basket']:.1f} items per basket", "success"))
-        else:
-            insights.append(("🎯 Upselling Opportunity", f"Only {kpis['items_per_basket']:.1f} items per basket", "warning"))
-        
-        # Growth analysis
-        if kpis['growth_rate'] > 10:
-            insights.append(("🚀 Rapid Growth", f"Strong growth trend: +{kpis['growth_rate']:.1f}%", "success"))
-        elif kpis['growth_rate'] > 0:
-            insights.append(("📈 Positive Growth", f"Steady growth: +{kpis['growth_rate']:.1f}%", "success"))
-        elif kpis['growth_rate'] > -5:
-            insights.append(("📊 Stable Period", f"Minor fluctuation: {kpis['growth_rate']:.1f}%", "warning"))
-        else:
-            insights.append(("📉 Declining Trend", f"Negative growth: {kpis['growth_rate']:.1f}%", "danger"))
-        
-        # Display insights
-        for title, description, status in insights:
-            status_class = f"status-{status}"
-            st.markdown(f"""
-            <div class="insight-card">
-                <div style="display: flex; align-items: center; margin-bottom: 8px;">
-                    <span class="status-badge {status_class}">{title}</span>
-                </div>
-                <p style="margin: 0; color: var(--text-secondary); font-weight: 500;">{description}</p>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("### 🎯 Smart Recommendations")
-        
-        recommendations = []
-        
-        # Revenue optimization
-        if kpis['avg_basket'] < 50:
-            recommendations.append("🎯 **Bundle Products** - Increase average basket size through product bundles")
-        
-        if kpis['discount_rate'] > 15:
-            recommendations.append("💰 **Review Pricing** - High discount rate may impact profitability")
-        
-        if kpis['items_per_basket'] < 2:
-            recommendations.append("🛍️ **Cross-sell Training** - Train staff on suggesting complementary items")
-        
-        if kpis['gross_margin'] < 25:
-            recommendations.append("📊 **Cost Analysis** - Review supplier costs and pricing strategy")
-        
-        if kpis['growth_rate'] < 0:
-            recommendations.append("📈 **Marketing Focus** - Implement customer acquisition campaigns")
-        
-        # Operational recommendations
-        if df["Date"].notna().any():
-            # Peak day analysis
-            day_performance = df.groupby(df["Date"].dt.day_name())["Sales"].mean()
-            if not day_performance.empty:
-                peak_day = day_performance.idxmax()
-                recommendations.append(f"⭐ **{peak_day} Strategy** - Replicate {peak_day} success across other days")
-        
-        if not recommendations:
-            recommendations = [
-                "🎉 **Excellent Performance** - All metrics are healthy",
-                "🚀 **Scale Operations** - Consider expansion opportunities",
-                "💡 **Innovation Focus** - Explore new product categories"
-            ]
-        
-        for rec in recommendations:
-            st.markdown(f"""
-            <div class="insight-card" style="padding: 16px;">
-                <p style="margin: 0; font-weight: 600; color: var(--text-primary);">{rec}</p>
-            </div>
-            """, unsafe_allow_html=True)
+    return d, flt_info
 
-def render_data_export_tab(df: pd.DataFrame, column_mapping: Dict[str, str]):
-    """Render data management and export"""
-    st.markdown("## 📊 Data Management & Export")
-    
-    # Data quality overview
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.markdown("""
-        <div class="alert-card">
-            <h4 style="margin: 0 0 12px 0;">📅 Data Coverage</h4>
-        """, unsafe_allow_html=True)
-        if df["Date"].notna().any():
-            st.write(f"**From:** {df['Date'].min().strftime('%Y-%m-%d')}")
-            st.write(f"**To:** {df['Date'].max().strftime('%Y-%m-%d')}")
-            st.write(f"**Days:** {df['Date'].dt.date.nunique()}")
-        st.markdown("</div>", unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("""
-        <div class="alert-card">
-            <h4 style="margin: 0 0 12px 0;">📊 Data Volume</h4>
-        """, unsafe_allow_html=True)
-        st.write(f"**Records:** {len(df):,}")
-        st.write(f"**Stores:** {df['Store'].nunique()}")
-        st.write(f"**Products:** {df['Item'].nunique()}")
-        st.write(f"**Categories:** {df['Category'].nunique()}")
-        st.markdown("</div>", unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown("""
-        <div class="alert-card">
-            <h4 style="margin: 0 0 12px 0;">✅ Data Quality</h4>
-        """, unsafe_allow_html=True)
-        completeness = (1 - df.isnull().sum().sum() / (len(df) * len(df.columns))) * 100
-        st.write(f"**Completeness:** {completeness:.1f}%")
-        st.write(f"**Sales Records:** {(df['Sales'] > 0).sum():,}")
-        st.write(f"**Valid Dates:** {df['Date'].notna().sum():,}")
-        st.markdown("</div>", unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown("""
-        <div class="alert-card">
-            <h4 style="margin: 0 0 12px 0;">📥 Export Options</h4>
-        """, unsafe_allow_html=True)
-        
-        # Enhanced Excel export
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            # Main data
-            df.to_excel(writer, sheet_name='Complete Data', index=False)
-            
-            # Store summary
-            if df["Store"].nunique() > 1:
-                store_summary = df.groupby("Store").agg({
-                    "Sales": ["sum", "mean"],
-                    "Tickets": "sum",
-                    "Qty": "sum"
-                }).round(2)
-                store_summary.to_excel(writer, sheet_name='Store Summary')
-            
-            # Daily summary
-            if df["Date"].notna().any():
-                daily_summary = df.groupby(df["Date"].dt.date).agg({
-                    "Sales": "sum",
-                    "Tickets": "sum",
-                    "Qty": "sum"
-                }).reset_index()
-                daily_summary.to_excel(writer, sheet_name='Daily Summary', index=False)
-            
-            # Product summary
-            if df["Item"].notna().any():
-                product_summary = df.groupby("Item").agg({
-                    "Sales": "sum",
-                    "Qty": "sum",
-                    "GrossProfit": "sum"
-                }).sort_values("Sales", ascending=False).head(50)
-                product_summary.to_excel(writer, sheet_name='Top Products')
-        
-        st.download_button(
-            "📊 Download Excel Report",
-            buffer.getvalue(),
-            f"Alkhair_Analytics_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-        
-        # CSV export
-        csv_buffer = io.StringIO()
-        df.to_csv(csv_buffer, index=False)
-        st.download_button(
-            "📄 Download CSV",
-            csv_buffer.getvalue(),
-            f"Alkhair_Data_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            "text/csv"
-        )
-        
-        st.markdown("</div>", unsafe_allow_html=True)
-    
-    # Column mapping
-    st.markdown("### 🔗 Data Structure Analysis")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("**📋 Column Mappings**")
-        mapping_data = []
-        for target, source in column_mapping.items():
-            status = "✅" if source != "(missing)" else "❌"
-            mapping_data.append({"Status": status, "Target": target, "Source": source})
-        
-        mapping_df = pd.DataFrame(mapping_data)
-        st.dataframe(mapping_df, use_container_width=True, hide_index=True)
-    
-    with col2:
-        st.markdown("**📊 Data Preview**")
-        st.dataframe(df.head(10), use_container_width=True)
 
-# =========================
-# MAIN APPLICATION
-# =========================
-def main():
-    """Main application with beautiful design"""
-    
-    # Apply stunning CSS
-    apply_stunning_css()
-    
-    # Auto-refresh functionality
-    components.html(
-        f"<meta http-equiv='refresh' content='{config.REFRESH_MINUTES * 60}'>",
-        height=0
+def chart_sales_over_time(df: pd.DataFrame) -> None:
+    date_col = _col_finder(df, ["date", "trans date", "sales date", "invoice date"])
+    sales_col = _col_finder(df, ["sales", "net sales", "amount", "total", "net amount"])
+    if not date_col or not sales_col:
+        st.info("Add columns: Date and Sales to enable this chart.")
+        return
+    d = df.copy()
+    d[date_col] = pd.to_datetime(d[date_col], errors="coerce", dayfirst=True)
+    d[sales_col] = _safe_numeric(d[sales_col])
+    g = d.groupby(d[date_col].dt.date, as_index=False)[sales_col].sum()
+    fig = px.line(g, x=g.columns[0], y=sales_col, markers=True, title="Sales over time")
+    fig.update_layout(margin=dict(l=10, r=10, t=50, b=10), hovermode="x unified", showlegend=False)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
+def chart_sales_by_branch(df: pd.DataFrame) -> None:
+    branch_col = _col_finder(df, ["branch", "store", "location"])
+    sales_col = _col_finder(df, ["sales", "net sales", "amount", "total", "net amount"])
+    if not branch_col or not sales_col:
+        st.info("Add columns: Branch and Sales to enable this chart.")
+        return
+    d = df.copy()
+    d[sales_col] = _safe_numeric(d[sales_col])
+    g = d.groupby(branch_col, as_index=False)[sales_col].sum().sort_values(sales_col, ascending=False)
+    fig = px.bar(g, x=branch_col, y=sales_col, title="Sales by Branch")
+    fig.update_layout(margin=dict(l=10, r=10, t=50, b=10), hovermode="x", showlegend=False)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
+def chart_top_items(df: pd.DataFrame, top_n: int = 10) -> None:
+    item_col = _col_finder(df, ["item", "product", "sku", "description", "item name"]) 
+    sales_col = _col_finder(df, ["sales", "net sales", "amount", "total", "net amount"])
+    if not item_col or not sales_col:
+        st.info("Add columns: Item and Sales to enable this chart.")
+        return
+    d = df.copy()
+    d[sales_col] = _safe_numeric(d[sales_col])
+    g = (
+        d.groupby(item_col, as_index=False)[sales_col]
+        .sum()
+        .sort_values(sales_col, ascending=False)
+        .head(top_n)
     )
-    
-    # Beautiful Hero Header
-    st.markdown(f"""
-    <div class="hero-header">
-        <div class="hero-content">
-            <div style="display: flex; align-items: center; justify-content: space-between;">
-                <div>
-                    <h1 style="margin: 0; font-size: 2.5rem; font-weight: 900; text-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                        🏪 Alkhair Family Market
-                    </h1>
-                    <p style="margin: 8px 0 0 0; font-size: 1.2rem; opacity: 0.9; font-weight: 500;">
-                        Executive Analytics Dashboard • Real-time Business Intelligence
-                    </p>
-                </div>
-                <div style="text-align: right; opacity: 0.9;">
-                    <div style="font-size: 1rem; font-weight: 600;">⚡ Live Data</div>
-                    <div style="font-size: 0.9rem;">Updated: {datetime.now().strftime('%H:%M:%S')}</div>
-                    <div style="font-size: 0.85rem;">Auto-refresh: {config.REFRESH_MINUTES}min</div>
-                </div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Refresh button with style
-    col1, col2 = st.columns([10, 1])
-    with col2:
-        if st.button("🔄 Refresh", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
-    
-    # Load data
-    @st.cache_data(ttl=0, show_spinner=False)
-    def load_dashboard_data(url: str) -> pd.DataFrame:
-        """Load data from Google Sheets with error handling"""
-        try:
-            return pd.read_csv(url)
-        except Exception as e:
-            st.error(f"Failed to load data: {str(e)}")
-            return pd.DataFrame()
-    
-    # Data loading with beautiful spinner
-    with st.spinner("🔄 Loading live data..."):
-        raw_data = load_dashboard_data(config.DATA_SOURCE_URL)
-    
-    if raw_data.empty:
-        st.error("❌ No data could be loaded from the source.")
-        st.stop()
-    
-    # Process data
-    data, column_mapping = DataProcessor.standardize_dataframe(raw_data)
-    
-    # Beautiful Filter Section
-    st.markdown("""
-    <div class="filter-section">
-        <h3 style="margin: 0 0 20px 0; color: var(--text-primary);">🔍 Data Filters</h3>
-    """, unsafe_allow_html=True)
-    
-    col1, col2, col3, col4 = st.columns([2, 2, 3, 3])
-    
-    # Date range filter
-    if data["Date"].notna().any():
-        date_min = data["Date"].min().date()
-        date_max = data["Date"].max().date()
-        
-        with col1:
-            start_date = st.date_input("📅 Start Date", value=date_min)
-        with col2:
-            end_date = st.date_input("📅 End Date", value=date_max)
-        
-        mask = (data["Date"].dt.date >= start_date) & (data["Date"].dt.date <= end_date)
-        filtered_data = data[mask].copy()
-    else:
-        filtered_data = data.copy()
-    
-    # Store filter
-    if filtered_data["Store"].nunique() > 1:
-        stores = sorted([s for s in filtered_data["Store"].unique() if s and s != "Unknown"])
-        
-        with col3:
-            selected_stores = st.multiselect(
-                "🏪 Select Stores",
-                options=stores,
-                default=stores,
-                key="store_filter"
-            )
-        
-        if selected_stores:
-            filtered_data = filtered_data[filtered_data["Store"].isin(selected_stores)]
-    
-    # Quick date presets
-    with col4:
-        preset = st.selectbox(
-            "⚡ Quick Select",
-            ["Custom Range", "Last 7 Days", "Last 30 Days", "This Month", "All Time"]
+    fig = px.bar(g, x=item_col, y=sales_col, title=f"Top {top_n} Items by Sales")
+    fig.update_layout(margin=dict(l=10, r=10, t=50, b=10), hovermode="x", showlegend=False)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
+# ----------------------------
+# UI
+# ----------------------------
+
+def main() -> None:
+    st.set_page_config(page_title="Google Sheets Dashboard", layout="wide")
+
+    # Header
+    left, right = st.columns([0.8, 0.2], gap="large")
+    with left:
+        st.title(APP_TITLE)
+        st.caption(f"Data source: Google Sheets (published). Company: {COMPANY_NAME}")
+    with right:
+        st.image(
+            "https://static.streamlit.io/examples/dice.jpg",
+            caption="Streamlit",
+            use_column_width=True,
         )
-        
-        if preset != "Custom Range" and data["Date"].notna().any():
-            today = datetime.now().date()
-            if preset == "Last 7 Days":
-                start_preset = today - timedelta(days=7)
-                filtered_data = data[data["Date"].dt.date >= start_preset]
-            elif preset == "Last 30 Days":
-                start_preset = today - timedelta(days=30)
-                filtered_data = data[data["Date"].dt.date >= start_preset]
-            elif preset == "This Month":
-                start_preset = today.replace(day=1)
-                filtered_data = data[data["Date"].dt.date >= start_preset]
-            else:  # All Time
-                filtered_data = data.copy()
-    
-    st.markdown("</div>", unsafe_allow_html=True)
-    
-    # Calculate KPIs
-    kpis = AnalyticsEngine.calculate_kpis(filtered_data)
-    
-    # Beautiful Tab Navigation
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "🏠 Dashboard Overview",
-        "📊 Advanced Analytics", 
-        "⭐ Product Intelligence",
-        "📥 Data & Export"
-    ])
-    
-    with tab1:
-        render_dashboard_overview(filtered_data, kpis)
-    
-    with tab2:
-        render_analytics_tab(filtered_data, kpis)
-    
-    with tab3:
-        render_products_tab(filtered_data)
-    
-    with tab4:
-        render_data_export_tab(filtered_data, column_mapping)
-    
-    # Beautiful footer
-    st.markdown("""
-    <div style="text-align: center; padding: 40px 0 20px 0; color: rgba(255,255,255,0.7);">
-        <p style="margin: 0; font-size: 0.9rem;">
-            🏪 Alkhair Family Market Dashboard • Built with ❤️ for Business Excellence
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+
+    # Sidebar — data source + refresh controls
+    st.sidebar.header("Controls")
+    url = st.sidebar.text_input("Published Google Sheets URL", value=DEFAULT_PUBLISHED_URL)
+
+    auto = st.sidebar.toggle("Auto-refresh", value=False, help="Reload data automatically")
+    every = st.sidebar.slider("Interval (seconds)", 15, 600, 60, help="How often to refresh when Auto is ON")
+    if auto:
+        st.sidebar.caption("Auto-refreshing…")
+        st.experimental_set_query_params(_=str(int(time.time())))  # Bust cache in URL
+        st.autorefresh(interval=every * 1000, key="_autorefresh_key")
+
+    if st.sidebar.button("Reload now", use_container_width=True):
+        fetch_workbook.clear()  # clear cache
+        st.experimental_rerun()
+
+    # Load workbook
+    with st.spinner("Downloading workbook and reading sheets…"):
+        try:
+            sheet_names, dfs, last_mod = fetch_workbook(url)
+        except Exception as e:
+            st.error(
+                "Couldn't load the published Google Sheet. Please confirm the URL is public (File → Share → Publish to web).\n\n" + str(e)
+            )
+            return
+
+    if not dfs:
+        st.warning("No non-empty sheets found in the workbook.")
+        return
+
+    # Choose a sheet
+    st.subheader("Data selection")
+    pick = st.selectbox("Sheet", sheet_names, index=0)
+    df = dfs[pick].copy()
+
+    # Show metadata
+    meta_cols = st.columns(3)
+    with meta_cols[0]:
+        st.metric("Rows", f"{len(df):,}")
+    with meta_cols[1]:
+        st.metric("Columns", f"{len(df.columns):,}")
+    with meta_cols[2]:
+        ts = last_mod or datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        st.metric("Last Modified (server)", ts)
+
+    # Filters
+    df_filtered, flt_info = apply_filters(df)
+
+    # KPIs
+    st.subheader("Key Metrics")
+    kpi = kpi_section(df_filtered)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Sales", _human(kpi.get("sales")))
+    c2.metric("Total Profit", _human(kpi.get("profit")))
+    c3.metric("Baskets / Tickets", _human(kpi.get("baskets")))
+    c4.metric("Avg Ticket", _human(kpi.get("avg_ticket")))
+
+    # Quick insights
+    with st.expander("Quick insights"):
+        msgs = []
+        if not math.isnan(kpi.get("profit", float("nan"))) and kpi.get("profit", 0) < 0:
+            msgs.append("⚠️ Profit is negative on the current selection.")
+        if not math.isnan(kpi.get("sales", float("nan"))) and kpi.get("sales", 0) == 0:
+            msgs.append("ℹ️ Sales are 0 for the selected range — check filters.")
+        if not msgs:
+            st.write("Looks good! No alerts based on the available columns.")
+        else:
+            for m in msgs:
+                st.write(m)
+
+    # Charts
+    st.subheader("Charts")
+    chart_cols = st.columns(2)
+    with chart_cols[0]:
+        chart_sales_over_time(df_filtered)
+    with chart_cols[1]:
+        chart_sales_by_branch(df_filtered)
+
+    chart_top_items(df_filtered, top_n=10)
+
+    # Data table
+    st.subheader("Data table (filtered)")
+    st.dataframe(df_filtered, use_container_width=True)
+
+    # Download filtered CSV
+    csv = df_filtered.to_csv(index=False).encode("utf-8")
+    st.download_button("Download filtered CSV", data=csv, file_name=f"{pick}_filtered.csv", mime="text/csv")
+
+    st.caption("Built with ❤️ in Streamlit. Update your Google Sheet and refresh here to see changes.")
+
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        st.error(f"❌ Application Error: {str(e)}")
-        st.info("Please refresh the page or contact support if the issue persists.")
-        st.stop()
+    main()
