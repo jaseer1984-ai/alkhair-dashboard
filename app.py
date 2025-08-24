@@ -207,6 +207,7 @@ def main():
     st.markdown('</div>', unsafe_allow_html=True)  # Close main-content
     st.markdown('</div>', unsafe_allow_html=True)  # Close dashboard-layout
 
+
 if __name__ == "__main__":
     try:
         main()
