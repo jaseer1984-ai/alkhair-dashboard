@@ -1,11 +1,3 @@
-# app.py
-# Al Khair Business Performance — Multi-Branch Executive Dashboard
-# - Uses your published Google Sheet URL (auto-converts /pubhtml → /pub?output=xlsx)
-# - Hides sidebar; shows URL box + Refresh button on top
-# - Branch filter (multiselect), Date filter, Quick Insights, Tabs
-
-from __future__ import annotations
-
 import io
 import re
 from datetime import datetime, timedelta
@@ -18,561 +10,234 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-
 # =========================
 # CONFIGURATION
 # =========================
-class Config:
-    PAGE_TITLE = "Al Khair Business Performance"
-    LAYOUT = "wide"
-    DEFAULT_PUBLISHED_URL = (
-        "https://docs.google.com/spreadsheets/d/e/2PACX-1vQG7boLWl2bNLCPR05NXv6EFpPPcFfXsiXPQ7rAGYr3q8Nkc2Ijg8BqEwVofcMLSg/pubhtml"
-    )
-    BRANCHES = {
-        "Al khair - 102": {"name": "Al Khair", "code": "102", "color": "#3b82f6"},
-        "Noora - 104": {"name": "Noora", "code": "104", "color": "#10b981"},
-        "Hamra - 109": {"name": "Hamra", "code": "109", "color": "#f59e0b"},
-        "Magnus - 107": {"name": "Magnus", "code": "107", "color": "#8b5cf6"},
-    }
-    TARGETS = {"sales_achievement": 95.0, "nob_achievement": 90.0, "abv_achievement": 90.0}
+SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQG7boLWl2bNLCPR05NXv6EFpPPcFfXsiXPQ7rAGYr3q8Nkc2Ijg8BqEwVofcMLSg/pub?output=xlsx"
 
-
-config = Config()
-st.set_page_config(page_title=config.PAGE_TITLE, layout=config.LAYOUT, initial_sidebar_state="collapsed")
-
+st.set_page_config(page_title="Al Khair Business Performance", layout="wide", initial_sidebar_state="collapsed")
 
 # =========================
-# STYLES (CSS)
+# STYLES (hide alerts + top KPI cards)
 # =========================
-def apply_css():
+CARD_CSS = """
+<style>
+  .kpi-grid {display:grid; grid-template-columns:repeat(4, 1fr); gap:16px; margin: 10px 0 18px 0;}
+  .kpi-card {background:#fff;border:1px solid rgba(0,0,0,.06);border-radius:16px;padding:16px 18px;}
+  .kpi-title {font-weight:800;color:#334155;font-size:.95rem;margin-bottom:6px}
+  .kpi-value {font-weight:900;font-size:1.8rem;line-height:1;margin-bottom:8px}
+  .pill {display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-weight:700;font-size:.80rem}
+  .pill.ok {background:rgba(16,185,129,.15); color:#059669;}
+  .pill.warn {background:rgba(245,158,11,.15); color:#b45309;}
+  .pill.bad {background:rgba(239,68,68,.15); color:#b91c1c;}
+  .bar {height:10px;background:#eef2f7;border-radius:999px;overflow:hidden;margin-top:10px}
+  .bar>div {height:100%;border-radius:999px}
+  /* Hide any Streamlit alert banners (success/info/warn) */
+  .stAlert {display:none !important}
+</style>
+"""
+
+st.markdown(CARD_CSS, unsafe_allow_html=True)
+
+# =========================
+# LOAD DATA
+# =========================
+@st.cache_data(ttl=300)
+def load_data(url: str) -> Dict[str, pd.DataFrame]:
+    r = requests.get(url, timeout=60)
+    r.raise_for_status()
+    xls = pd.ExcelFile(io.BytesIO(r.content))
+    data: Dict[str, pd.DataFrame] = {}
+    for sn in xls.sheet_names:
+        df = xls.parse(sn)
+        df = df.dropna(how='all').dropna(axis=1, how='all')
+        if not df.empty:
+            data[sn] = df
+    return data
+
+# =========================
+# HELPERS
+# =========================
+
+def compute_kpis(df: pd.DataFrame) -> Dict[str, Any]:
+    k: Dict[str, Any] = {}
+    sales_a = float(df.get('SalesActual', pd.Series(dtype=float)).sum())
+    sales_t = float(df.get('SalesTarget', pd.Series(dtype=float)).sum())
+    k['sales_actual'] = sales_a
+    k['sales_target'] = sales_t
+    k['sales_pct'] = (sales_a / sales_t * 100) if sales_t > 0 else 0.0
+
+    nob_a = float(df.get('NOBActual', pd.Series(dtype=float)).sum()) if 'NOBActual' in df else 0.0
+    nob_t = float(df.get('NOBTarget', pd.Series(dtype=float)).sum()) if 'NOBTarget' in df else 0.0
+    k['nob_actual'] = nob_a
+    k['nob_target'] = nob_t
+    k['nob_pct'] = (nob_a / nob_t * 100) if nob_t > 0 else 0.0
+
+    abv_a = float(df.get('ABVActual', pd.Series(dtype=float)).mean()) if 'ABVActual' in df else 0.0
+    abv_t = float(df.get('ABVTarget', pd.Series(dtype=float)).mean()) if 'ABVTarget' in df else 0.0
+    k['abv_actual'] = abv_a
+    k['abv_target'] = abv_t
+    k['abv_pct'] = (abv_a / abv_t * 100) if abv_t > 0 else 0.0
+
+    comps = [p for p in [k['sales_pct'], k['nob_pct'], k['abv_pct']] if p > 0]
+    k['overall_score'] = float(np.mean(comps)) if comps else 0.0
+    return k
+
+
+def pill_class(pct: float, target: float) -> str:
+    if pct >= target: return 'ok'
+    if pct >= target * 0.9: return 'warn'
+    return 'bad'
+
+
+def render_top_cards(k: Dict[str, Any]):
+    # targets used for color thresholds
+    tgt_sales, tgt_nob, tgt_abv = 95.0, 90.0, 90.0
+    st.markdown('<div class="kpi-grid">', unsafe_allow_html=True)
+
+    # Sales
     st.markdown(
-        """
-        <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
-        html, body, [data-testid="stAppViewContainer"] { font-family: 'Inter', sans-serif; }
-        .main .block-container { padding: 2rem; max-width: 1500px; }
-        /* Hide Sidebar */
-        [data-testid='stSidebar'] { display: none !important; }
-
-        .title { font-weight:900; font-size:1.6rem; margin-bottom:.5rem; }
-        [data-testid="metric-container"] {
-            background:#fff !important; border-radius:16px !important; border:1px solid rgba(0,0,0,.06)!important; padding:18px!important;
-        }
-        .stPlotlyChart > div { background:#fff; border:1px solid rgba(0,0,0,.06); border-radius:16px; padding:12px; }
-        .stTabs [data-baseweb="tab-list"]{ gap:6px; background:#fff; border-radius:14px; padding:8px; border:1px solid rgba(0,0,0,0.05)}
-        .stTabs [data-baseweb="tab"]{ border-radius:12px; }
-
-        .branch-card { background:#fff; border:1px solid rgba(0,0,0,.06); border-radius:16px; padding:18px; margin:12px 0; }
-        .branch-header { font-weight: 800; font-size: 1.1rem; display:flex; align-items:center; gap:10px; }
-        .badge { padding: 4px 10px; border-radius: 999px; font-size: .8rem; font-weight:700; }
-        .excellent { background: rgba(16,185,129,.15); color:#059669; }
-        .good { background: rgba(59,130,246,.15); color:#2563eb; }
-        .warn { background: rgba(245,158,11,.15); color:#d97706; }
-        .danger { background: rgba(239,68,68,.15); color:#dc2626; }
-
-        .progress { height:10px; background:#f1f5f9; border-radius:999px; overflow:hidden; }
-        .progress > div { height:100%; transition: width .6s ease; }
-        </style>
+        f"""
+        <div class='kpi-card'>
+          <div class='kpi-title'>Sales</div>
+          <div class='kpi-value'>SAR {k['sales_actual']:,.0f}</div>
+          <span class='pill {pill_class(k['sales_pct'], tgt_sales)}'>↑ {k['sales_pct']:.1f}% of target</span>
+          <div class='bar'><div style='width:{min(k['sales_pct'],100):.1f}%;background:linear-gradient(90deg,#60a5fa,#22d3ee)'></div></div>
+        </div>
         """,
         unsafe_allow_html=True,
     )
 
-
-# =========================
-# HELPERS & LOADING
-# =========================
-def _pubhtml_to_xlsx(url: str) -> str:
-    if "docs.google.com/spreadsheets/d/e/" in url:
-        return re.sub(r"/pubhtml(.*)$", "/pub?output=xlsx", url.strip())
-    return url
-
-
-@st.cache_data(show_spinner=False)
-def load_workbook_from_gsheet(published_url: str) -> Dict[str, pd.DataFrame]:
-    url = _pubhtml_to_xlsx((published_url or config.DEFAULT_PUBLISHED_URL).strip())
-    r = requests.get(url, timeout=60)
-    r.raise_for_status()
-    xls = pd.ExcelFile(io.BytesIO(r.content))
-    sheets: Dict[str, pd.DataFrame] = {}
-    for sn in xls.sheet_names:
-        df = xls.parse(sn)
-        df = df.dropna(how="all").dropna(axis=1, how="all")
-        if not df.empty:
-            sheets[sn] = df
-    return sheets
-
-
-def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
-    combined = []
-    mapping = {
-        "Date": "Date",
-        "Day": "Day",
-        "Sales Target": "SalesTarget",
-        "Sales Achivement": "SalesActual",
-        "Sales Achievement": "SalesActual",
-        "Sales %": "SalesPercent",
-        " Sales %": "SalesPercent",
-        "NOB Target": "NOBTarget",
-        "NOB Achievemnet": "NOBActual",
-        "NOB Achievement": "NOBActual",
-        "NOB %": "NOBPercent",
-        " NOB %": "NOBPercent",
-        "ABV Target": "ABVTarget",
-        "ABV Achievement": "ABVActual",
-        " ABV Achievement": "ABVActual",
-        "ABV %": "ABVPercent",
-    }
-    for sheet_name, df in excel_data.items():
-        if df.empty:
-            continue
-        d = df.copy()
-        d.columns = d.columns.astype(str).str.strip()
-        for old, new in mapping.items():
-            if old in d.columns:
-                d.rename(columns={old: new}, inplace=True)
-        d["Branch"] = sheet_name
-        d["BranchName"] = config.BRANCHES.get(sheet_name, {}).get("name", sheet_name)
-        d["BranchCode"] = config.BRANCHES.get(sheet_name, {}).get("code", "000")
-        if "Date" in d.columns:
-            d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
-        for col in [
-            "SalesTarget",
-            "SalesActual",
-            "SalesPercent",
-            "NOBTarget",
-            "NOBActual",
-            "NOBPercent",
-            "ABVTarget",
-            "ABVActual",
-            "ABVPercent",
-        ]:
-            if col in d.columns:
-                d[col] = pd.to_numeric(d[col], errors="coerce")
-        combined.append(d)
-    return pd.concat(combined, ignore_index=True) if combined else pd.DataFrame()
-
-
-def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
-    if df.empty:
-        return {}
-    k: Dict[str, Any] = {}
-    k["total_sales_target"] = float(df.get("SalesTarget", pd.Series(dtype=float)).sum())
-    k["total_sales_actual"] = float(df.get("SalesActual", pd.Series(dtype=float)).sum())
-    k["total_sales_variance"] = k["total_sales_actual"] - k["total_sales_target"]
-    k["overall_sales_percent"] = (
-        k["total_sales_actual"] / k["total_sales_target"] * 100 if k["total_sales_target"] > 0 else 0
-    )
-    k["total_nob_target"] = float(df.get("NOBTarget", pd.Series(dtype=float)).sum())
-    k["total_nob_actual"] = float(df.get("NOBActual", pd.Series(dtype=float)).sum())
-    k["overall_nob_percent"] = (
-        k["total_nob_actual"] / k["total_nob_target"] * 100 if k["total_nob_target"] > 0 else 0
-    )
-    k["avg_abv_target"] = float(df.get("ABVTarget", pd.Series(dtype=float)).mean()) if "ABVTarget" in df else 0
-    k["avg_abv_actual"] = float(df.get("ABVActual", pd.Series(dtype=float)).mean()) if "ABVActual" in df else 0
-    k["overall_abv_percent"] = (
-        k["avg_abv_actual"] / k["avg_abv_target"] * 100 if k["avg_abv_target"] > 0 else 0
+    # NOB
+    st.markdown(
+        f"""
+        <div class='kpi-card'>
+          <div class='kpi-title'>Baskets (NOB)</div>
+          <div class='kpi-value'>{k['nob_actual']:,.0f}</div>
+          <span class='pill {pill_class(k['nob_pct'], tgt_nob)}'>↑ {k['nob_pct']:.1f}% of target</span>
+          <div class='bar'><div style='width:{min(k['nob_pct'],100):.1f}%;background:linear-gradient(90deg,#34d399,#10b981)'></div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    if "BranchName" in df.columns:
-        k["branch_performance"] = (
-            df.groupby("BranchName")
-            .agg(
-                {
-                    "SalesTarget": "sum",
-                    "SalesActual": "sum",
-                    "SalesPercent": "mean",
-                    "NOBTarget": "sum",
-                    "NOBActual": "sum",
-                    "NOBPercent": "mean",
-                    "ABVTarget": "mean",
-                    "ABVActual": "mean",
-                    "ABVPercent": "mean",
-                }
-            )
-            .round(2)
-        )
+    # ABV
+    st.markdown(
+        f"""
+        <div class='kpi-card'>
+          <div class='kpi-title'>Avg Basket Value</div>
+          <div class='kpi-value'>SAR {k['abv_actual']:,.2f}</div>
+          <span class='pill {pill_class(k['abv_pct'], tgt_abv)}'>↑ {k['abv_pct']:.1f}% of target</span>
+          <div class='bar'><div style='width:{min(k['abv_pct'],100):.1f}%;background:linear-gradient(90deg,#f59e0b,#fbbf24)'></div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    if "Date" in df.columns and df["Date"].notna().any():
-        k["date_range"] = {
-            "start": df["Date"].min(),
-            "end": df["Date"].max(),
-            "days": int(df["Date"].dt.date.nunique()),
-        }
+    # Overall score
+    st.markdown(
+        f"""
+        <div class='kpi-card'>
+          <div class='kpi-title'>Overall Score</div>
+          <div class='kpi-value'>{k['overall_score']:.1f}%</div>
+          <span class='pill ok'>↑ Average Performance</span>
+          <div class='bar'><div style='width:{min(k['overall_score'],100):.1f}%;background:linear-gradient(90deg,#818cf8,#60a5fa)'></div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    score = 0
-    w = 0
-    if k.get("overall_sales_percent", 0) > 0:
-        score += min(k["overall_sales_percent"] / 100, 1.2) * 40
-        w += 40
-    if k.get("overall_nob_percent", 0) > 0:
-        score += min(k["overall_nob_percent"] / 100, 1.2) * 35
-        w += 35
-    if k.get("overall_abv_percent", 0) > 0:
-        score += min(k["overall_abv_percent"] / 100, 1.2) * 25
-        w += 25
-    k["performance_score"] = (score / w * 100) if w > 0 else 0
-    return k
-
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # =========================
 # CHARTS
 # =========================
-def chart_branch_comparison(branch_data: pd.DataFrame) -> go.Figure:
-    if branch_data.empty:
+
+def branch_chart(df: pd.DataFrame) -> go.Figure:
+    if df.empty: return go.Figure()
+    g = df.groupby('BranchName').agg({'SalesActual':'sum','SalesTarget':'sum'}).reset_index()
+    g['Achievement'] = np.where(g['SalesTarget']>0, g['SalesActual']/g['SalesTarget']*100, 0)
+    fig = go.Figure(go.Bar(x=g['BranchName'], y=g['Achievement'], text=g['Achievement'].round(1).astype(str)+"%", textposition='outside'))
+    fig.update_layout(title="Branch Sales Achievement %", yaxis_title="%", xaxis_title="Branch")
+    return fig
+
+
+def daily_trends_chart(df: pd.DataFrame) -> go.Figure:
+    if df.empty or 'Date' not in df or df['Date'].isna().all():
         return go.Figure()
+    daily = df.groupby(['Date','BranchName']).agg({'SalesActual':'sum'}).reset_index()
     fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=branch_data.index,
-            y=branch_data["SalesPercent"],
-            name="Sales Achievement %",
-            marker=dict(
-                color=branch_data["SalesPercent"],
-                colorscale="RdYlGn",
-                cmin=0,
-                cmax=120,
-                showscale=True,
-                colorbar=dict(title="Achievement %", x=1.02),
-            ),
-            text=[f"{v:.1f}%" for v in branch_data["SalesPercent"]],
-            textposition="outside",
-            customdata=branch_data["SalesTarget"],
-            hovertemplate="<b>%{x}</b><br>Achievement: %{y:.1f}%<br>Target: SAR %{customdata:,.0f}<extra></extra>",
-        )
-    )
-    fig.add_hline(
-        y=100,
-        line_dash="dash",
-        line_color="#ef4444",
-        line_width=3,
-        annotation_text="💯 Target",
-        annotation_position="top right",
-    )
-    fig.add_hline(
-        y=95,
-        line_dash="dot",
-        line_color="#10b981",
-        line_width=2,
-        annotation_text="🌟 Excellence",
-        annotation_position="bottom right",
-    )
-    fig.update_layout(
-        title="Branch Sales Performance Comparison",
-        xaxis_title="Branch",
-        yaxis_title="Achievement (%)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        height=460,
-        showlegend=False,
-    )
+    for br in daily['BranchName'].unique():
+        d = daily[daily['BranchName']==br]
+        fig.add_trace(go.Scatter(x=d['Date'], y=d['SalesActual'], mode='lines+markers', name=br))
+    fig.update_layout(title='Daily Sales by Branch', xaxis_title='Date', yaxis_title='Sales')
     return fig
 
 
-def chart_daily_trends(df: pd.DataFrame) -> go.Figure:
-    if df.empty or "Date" not in df or df["Date"].isna().all():
-        return go.Figure()
-    daily = (
-        df.groupby(["Date", "BranchName"])
-        .agg({"SalesActual": "sum", "NOBActual": "sum", "ABVActual": "mean"})
-        .reset_index()
-    )
-    fig = make_subplots(
-        rows=3,
-        cols=1,
-        shared_xaxes=True,
-        subplot_titles=("Daily Sales", "Number of Baskets", "Average Basket Value"),
-        vertical_spacing=0.08,
-    )
-    colors = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444"]
-    for i, br in enumerate(daily["BranchName"].unique()):
-        d = daily[daily["BranchName"] == br]
-        col = colors[i % len(colors)]
-        fig.add_trace(
-            go.Scatter(x=d["Date"], y=d["SalesActual"], name=f"{br} — Sales", line=dict(color=col, width=3), mode="lines+markers"),
-            row=1,
-            col=1,
-        )
-        fig.add_trace(
-            go.Scatter(x=d["Date"], y=d["NOBActual"], name=f"{br} — NOB", line=dict(color=col, width=3), mode="lines+markers", showlegend=False),
-            row=2,
-            col=1,
-        )
-        fig.add_trace(
-            go.Scatter(x=d["Date"], y=d["ABVActual"], name=f"{br} — ABV", line=dict(color=col, width=3), mode="lines+markers", showlegend=False),
-            row=3,
-            col=1,
-        )
-    fig.update_layout(
-        height=800,
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"),
-    )
-    return fig
-
-
-# =========================
-# RENDER SECTIONS
-# =========================
-def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
-    st.markdown("### 🏆 Overall Performance")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("💰 Total Sales", f"SAR {k.get('total_sales_actual',0):,.0f}", delta=f"vs Target: {k.get('overall_sales_percent',0):.1f}%")
-    variance_color = "normal" if k.get("total_sales_variance", 0) >= 0 else "inverse"
-    c2.metric("📊 Sales Variance", f"SAR {k.get('total_sales_variance',0):,.0f}", delta=f"{k.get('overall_sales_percent',0)-100:+.1f}%", delta_color=variance_color)
-    nob_color = "normal" if k.get("overall_nob_percent", 0) >= 90 else "inverse"
-    c3.metric("🛍️ Total Baskets", f"{k.get('total_nob_actual',0):,.0f}", delta=f"Achievement: {k.get('overall_nob_percent',0):.1f}%", delta_color=nob_color)
-    abv_color = "normal" if k.get("overall_abv_percent", 0) >= 90 else "inverse"
-    c4.metric("💎 Avg Basket Value", f"SAR {k.get('avg_abv_actual',0):,.2f}", delta=f"vs Target: {k.get('overall_abv_percent',0):.1f}%", delta_color=abv_color)
-    score_color = "normal" if k.get("performance_score", 0) >= 80 else "off"
-    c5.metric("⭐ Performance Score", f"{k.get('performance_score',0):.0f}/100", delta="Weighted Score", delta_color=score_color)
-
-    st.markdown("### 🏪 Branch Performance Dashboard")
-    if "branch_performance" in k:
-        bp = k["branch_performance"]
-        for br, row in bp.iterrows():
-            info = None
-            for key, meta in config.BRANCHES.items():
-                if meta["name"] == br:
-                    info = meta
-                    break
-            if info is None:
-                info = {"color": "#6b7280", "code": "000"}
-            avg_pct = np.nanmean([row.get("SalesPercent", 0), row.get("NOBPercent", 0), row.get("ABVPercent", 0)])
-            if avg_pct >= 95:
-                badge, cls = "🏆 EXCELLENT", "excellent"
-            elif avg_pct >= 85:
-                badge, cls = "✅ GOOD", "good"
-            elif avg_pct >= 75:
-                badge, cls = "⚠️ NEEDS FOCUS", "warn"
-            else:
-                badge, cls = "🔴 ACTION REQUIRED", "danger"
-            st.markdown(
-                f"""
-                <div class='branch-card'>
-                  <div class='branch-header'>
-                    <span style='color:{info['color']}'>🏪</span> {br} (Code: {info.get('code','')})
-                    <span class='badge {cls}' style='margin-left:8px'>{badge}</span>
-                  </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            cc1, cc2, cc3, cc4 = st.columns(4)
-            cc1.metric("Sales", f"SAR {row.get('SalesActual',0):,.0f}", delta=f"{row.get('SalesPercent',0):.1f}% of target")
-            cc2.metric("Baskets (NOB)", f"{row.get('NOBActual',0):,.0f}", delta=f"{row.get('NOBPercent',0):.1f}% of target")
-            cc3.metric("Avg Basket Value", f"SAR {row.get('ABVActual',0):,.2f}", delta=f"{row.get('ABVPercent',0):.1f}% of target")
-            cc4.metric("Overall Score", f"{avg_pct:.1f}%", delta="Average Performance")
-            for label, pct, grad_to in [
-                ("Sales", row.get("SalesPercent", 0), "#22d3ee"),
-                ("Baskets (NOB)", row.get("NOBPercent", 0), "#10b981"),
-                ("Basket Value (ABV)", row.get("ABVPercent", 0), "#f59e0b"),
-            ]:
-                pct_c = min(float(pct if pd.notna(pct) else 0), 120.0)
-                st.markdown(
-                    f"""
-                    <div style='margin:10px 0;'>
-                      <div style='display:flex;justify-content:space-between;margin-bottom:6px;'>
-                        <span style='font-weight:600;color:#64748b'>{label}</span>
-                        <span style='font-weight:800;color:{info['color']}'>{pct_c:.1f}%</span>
-                      </div>
-                      <div class='progress'><div style='width:{min(pct_c,100)}%;background:linear-gradient(90deg,{info['color']},{grad_to});border-radius:999px'></div></div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-    st.markdown("### 📊 Comparisons")
-    c1, c2 = st.columns([2, 1])
-    if "branch_performance" in k:
-        with c1:
-            st.plotly_chart(chart_branch_comparison(k["branch_performance"]), use_container_width=True, config={"displayModeBar": False}, key="comp_overview")
-        with c2:
-            st.dataframe(
-                k["branch_performance"][["SalesPercent", "NOBPercent", "ABVPercent"]]
-                .round(1)
-                .rename(columns={"SalesPercent": "Sales %", "NOBPercent": "NOB %", "ABVPercent": "ABV %"}),
-                use_container_width=True,
-            )
-
-
-def render_daily(df: pd.DataFrame):
-    st.markdown("## 📈 Daily Performance Trends")
-    if df.empty:
-        st.info("No data available for trend analysis.")
-        return
-    if "Date" in df and df["Date"].notna().any():
-        opts = ["Last 7 Days", "Last 30 Days", "Last 3 Months", "All Time"]
-        choice = st.selectbox("Time Period", opts, index=1)
-        today = (df["Date"].max() if df["Date"].notna().any() else pd.Timestamp.today()).date()
-        if choice == "Last 7 Days":
-            start = today - timedelta(days=7)
-        elif choice == "Last 30 Days":
-            start = today - timedelta(days=30)
-        elif choice == "Last 3 Months":
-            start = today - timedelta(days=90)
-        else:
-            start = df["Date"].min().date()
-        mask = (df["Date"].dt.date >= start) & (df["Date"].dt.date <= today)
-        f = df.loc[mask].copy()
-    else:
-        f = df.copy()
-    st.plotly_chart(chart_daily_trends(f), use_container_width=True, config={"displayModeBar": False}, key="daily_trends")
-
-
-def render_export(df: pd.DataFrame, k: Dict[str, Any]):
-    st.markdown("## 📥 Data Export & Analysis")
-    if df.empty:
-        st.info("No data to export.")
-        return
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Total Records", f"{len(df):,}")
-        st.metric("Branches", f"{df['BranchName'].nunique() if 'BranchName' in df else 0}")
-        st.metric("Dates", f"{df['Date'].dt.date.nunique() if 'Date' in df else 0}")
-    with c2:
-        st.metric("Total Sales", f"SAR {k.get('total_sales_actual',0):,.0f}")
-        st.metric("Target Sales", f"SAR {k.get('total_sales_target',0):,.0f}")
-        st.metric("Variance", f"SAR {k.get('total_sales_variance',0):,.0f}")
-    with c3:
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
-            df.to_excel(writer, sheet_name="All Branches", index=False)
-            if "branch_performance" in k:
-                k["branch_performance"].to_excel(writer, sheet_name="Branch Summary")
-            if "Date" in df and df["Date"].notna().any():
-                daily = (
-                    df.groupby(["Date", "BranchName"])
-                    .agg({"SalesActual": "sum", "SalesTarget": "sum", "NOBActual": "sum", "ABVActual": "mean"})
-                    .reset_index()
-                )
-                daily.to_excel(writer, sheet_name="Daily Summary", index=False)
-        st.download_button(
-            "📊 Download Excel Report",
-            buf.getvalue(),
-            f"Alkhair_Branch_Analytics_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-        st.download_button(
-            "📄 Download CSV",
-            df.to_csv(index=False).encode("utf-8"),
-            f"Alkhair_Branch_Data_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-
+def competition_summary(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty: return pd.DataFrame()
+    g = df.groupby('BranchName').agg({'SalesActual':'sum','SalesTarget':'sum'}).reset_index()
+    g['Achievement'] = np.where(g['SalesTarget']>0, g['SalesActual']/g['SalesTarget']*100, 0)
+    return g.sort_values('Achievement', ascending=False)
 
 # =========================
 # MAIN
 # =========================
+
 def main():
-    apply_css()
+    st.title("🏪 Al Khair Business Performance")
 
-    # Top: title, URL input, Refresh
-    cA, cB = st.columns([0.75, 0.25])
-    with cA:
-        st.markdown(f"<div class='title'>📊 {config.PAGE_TITLE}</div>", unsafe_allow_html=True)
-        url = st.text_input(
-            "Published Google Sheets URL",
-            value=config.DEFAULT_PUBLISHED_URL,
-            help="Paste a Google Sheets 'Publish to web' URL. The app converts it to an .xlsx download.",
-        )
-    with cB:
-        if st.button("🔄 Refresh", use_container_width=True):
-            load_workbook_from_gsheet.clear()
-            st.experimental_rerun()
+    # Hidden source (URL not shown). Refresh only.
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.experimental_rerun()
 
-    # Load + process
-    with st.spinner("Downloading workbook from Google Sheets…"):
-        sheets_map = load_workbook_from_gsheet(url)
-    if not sheets_map:
-        st.warning("No non-empty sheets found.")
-        st.stop()
+    with st.spinner("Loading data from Google Sheets…"):
+        data = load_data(SHEET_URL)
 
-    with st.spinner("Processing branch data…"):
-        df = process_branch_data(sheets_map)
-    if df.empty:
-        st.error("Could not process data. Check column names and sheet structure.")
-        st.stop()
+    if not data:
+        st.error("No data loaded from Google Sheets.")
+        return
 
-    st.success(f"Loaded data for {df['BranchName'].nunique()} branches • {len(df):,} rows")
+    # Combine all sheets
+    frames = []
+    for sn, df in data.items():
+        d = df.copy()
+        d['BranchName'] = sn
+        if 'Date' in d.columns:
+            d['Date'] = pd.to_datetime(d['Date'], errors='coerce')
+        # Ensure numeric types if present
+        for c in ['SalesActual','SalesTarget','NOBActual','NOBTarget','ABVActual','ABVTarget']:
+            if c in d.columns:
+                d[c] = pd.to_numeric(d[c], errors='coerce')
+        frames.append(d)
+    df = pd.concat(frames, ignore_index=True)
 
-    # Global filters — Branch & Date (apply to all tabs)
-    if "BranchName" in df.columns:
-        all_branches = sorted([b for b in df["BranchName"].dropna().unique()])
-        selected = st.multiselect("Filter Branches", options=all_branches, default=all_branches, help="Applies to all tabs")
-        if selected:
-            df = df[df["BranchName"].isin(selected)].copy()
+    # --- Branch filter (before KPIs so cards react to selection) ---
+    branches = df['BranchName'].dropna().unique().tolist()
+    selected = st.multiselect("Select Branches", options=branches, default=branches)
+    df = df[df['BranchName'].isin(selected)]
 
-    if "Date" in df and df["Date"].notna().any():
-        c1, c2, _ = st.columns([2, 2, 6])
-        with c1:
-            start_d = st.date_input("Start Date", value=df["Date"].min().date())
-        with c2:
-            end_d = st.date_input("End Date", value=df["Date"].max().date())
-        mask = (df["Date"].dt.date >= start_d) & (df["Date"].dt.date <= end_d)
-        df = df.loc[mask].copy()
-
-    # KPIs + Quick Insights
-    k = calc_kpis(df)
-    with st.expander("⚡ Quick Insights", expanded=True):
-        insights = []
-        if "branch_performance" in k and not k["branch_performance"].empty:
-            bp = k["branch_performance"]
-            best_b = bp["SalesPercent"].idxmax()
-            best_v = bp.loc[best_b, "SalesPercent"]
-            worst_b = bp["SalesPercent"].idxmin()
-            worst_v = bp.loc[worst_b, "SalesPercent"]
-            insights.append(f"🥇 **Best Sales Achievement:** {best_b} at **{best_v:.1f}%**")
-            insights.append(f"🔻 **Lowest Sales Achievement:** {worst_b} at **{worst_v:.1f}%**")
-            below = bp[bp["SalesPercent"] < config.TARGETS["sales_achievement"]].index.tolist()
-            if below:
-                insights.append("⚠️ Branches below 95% target: " + ", ".join(below))
-        if k.get("total_sales_variance", 0) < 0:
-            insights.append(f"🟥 Overall variance negative by SAR {abs(k['total_sales_variance']):,.0f} (behind target)")
-        if not insights:
-            st.write("All metrics look healthy for the current selection.")
-        else:
-            for it in insights:
-                st.markdown("- " + it)
+    # --- Top KPI cards ---
+    k = compute_kpis(df)
+    render_top_cards(k)
 
     # Tabs
-    t1, t2, t3, t4, t5 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "🏆 Competition Analysis", "📥 Export", "📚 More Reports"])
+    t1, t2, t3 = st.tabs(["📊 Overview", "📈 Daily Trends", "🏆 Competition"])
     with t1:
-        render_overview(df, k)
+        st.plotly_chart(branch_chart(df), use_container_width=True, key="overview_chart")
     with t2:
-        render_daily(df)
+        st.plotly_chart(daily_trends_chart(df), use_container_width=True, key="daily_chart")
     with t3:
-        if "branch_performance" in k and not k["branch_performance"].empty:
-            bp = k["branch_performance"].copy()
-            bp["Rank by Sales %"] = (-bp["SalesPercent"]).rank(method="dense").astype(int)
-            st.dataframe(
-                bp.sort_values("SalesPercent", ascending=False)[
-                    ["Rank by Sales %", "SalesPercent", "NOBPercent", "ABVPercent", "SalesActual", "SalesTarget"]
-                ].rename(
-                    columns={
-                        "SalesPercent": "Sales %",
-                        "NOBPercent": "NOB %",
-                        "ABVPercent": "ABV %",
-                        "SalesActual": "Sales (Actual)",
-                        "SalesTarget": "Sales (Target)",
-                    }
-                ).round(1),
-                use_container_width=True,
-            )
-            st.plotly_chart(chart_branch_comparison(k["branch_performance"]), use_container_width=True, config={"displayModeBar": False}, key="comp_analysis")
+        comp = competition_summary(df)
+        if comp.empty:
+            st.info("No competition data available")
         else:
-            st.info("No branch performance data available.")
-    with t4:
-        render_export(df, k)
-    with t5:
-        st.info("Add custom reports here (e.g., item-wise trends, staff leaderboard, hourly metrics).")
-
+            st.dataframe(
+                comp[['BranchName','SalesActual','SalesTarget','Achievement']]
+                    .assign(Achievement=lambda x: x['Achievement'].round(1).astype(str)+'%'),
+                use_container_width=True
+            )
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        # Keep UI clean; show concise message (avoid noisy tracebacks)
-        st.error("❌ Application Error. Please adjust filters or refresh.")
+    main()
