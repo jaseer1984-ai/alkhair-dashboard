@@ -376,10 +376,11 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
     if "branch_performance" in k and not k["branch_performance"].empty:
         render_branch_cards(k["branch_performance"])
 
+    # Comparison table with COMMA-SEPARATED AMOUNTS
     if "branch_performance" in k and not k["branch_performance"].empty:
         st.markdown("### 📊 Comparison Table")
         bp = k["branch_performance"].copy()
-        st.dataframe(
+        df_table = (
             bp[["SalesPercent", "NOBPercent", "ABVPercent", "SalesActual", "SalesTarget"]]
             .rename(
                 columns={
@@ -390,9 +391,19 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
                     "SalesTarget": "Sales (Target)",
                 }
             )
-            .round(1),
+            .round(1)
+        )
+        st.dataframe(
+            df_table.style.format({
+                "Sales %": "{:,.1f}",
+                "NOB %": "{:,.1f}",
+                "ABV %": "{:,.1f}",
+                "Sales (Actual)": "{:,.0f}",
+                "Sales (Target)": "{:,.0f}",
+            }),
             use_container_width=True,
         )
+
         st.markdown("### 📉 Branch Performance Comparison")
         fig_cmp = _branch_comparison_chart(bp)
         st.plotly_chart(fig_cmp, use_container_width=True, config={"displayModeBar": False})
