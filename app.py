@@ -60,7 +60,7 @@ def apply_css():
 
         /* Light "content" cards */
         .card {
-          background: #fafafa;  /* light neutral base */
+          background: #fafafa;
           border: 1px solid #eef2f7;
           border-radius: 16px;
           padding: 16px;
@@ -74,25 +74,23 @@ def apply_css():
         .pill.warn      { background: rgba(245,158,11,.15);  color:#d97706; }
         .pill.danger    { background: rgba(239,68,68,.15);   color:#dc2626; }
 
-        /* Sidebar multiselect — pretty soft tags */
-        /* Selected tag “cards” */
+        /* Sidebar multiselect — soft tag pills */
         div[data-baseweb="tag"] {
-          background-color: #f3f4f6 !important;      /* soft gray */
-          color: #111827 !important;                 /* near-black text */
+          background-color: #f3f4f6 !important;
+          color: #111827 !important;
           border-radius: 12px !important;
           padding: 4px 10px !important;
           font-weight: 600 !important;
-          border: 1px solid #e5e7eb !important;      /* subtle border */
+          border: 1px solid #e5e7eb !important;
           transition: all 0.15s ease-in-out;
         }
         div[data-baseweb="tag"]:hover {
-          background-color: #e0f2fe !important;      /* very light blue hover */
+          background-color: #e0f2fe !important;
           border-color: #38bdf8 !important;
         }
-        /* Close (x) icon softer */
         div[data-baseweb="tag"] svg { fill: #6b7280 !important; }
 
-        /* Dropdown options a bit cleaner */
+        /* Cleaner dropdown options */
         [data-baseweb="select"] div[role="listbox"] div[role="option"] {
           border-radius: 8px; margin: 2px 6px; padding: 6px 8px;
         }
@@ -154,12 +152,13 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     for sheet_name, df in excel_data.items():
         d = df.copy()
         d.columns = d.columns.astype(str).str.strip()
-        for old,new in mapping.items():
+        for old, new in mapping.items():
             if old in d.columns and new not in d.columns:
-                d.rename(columns={old:new}, inplace=True)
+                d.rename(columns={old: new}, inplace=True)
         if "Date" not in d.columns:
             maybe = [c for c in d.columns if "date" in c.lower()]
-            if maybe: d.rename(columns={maybe[0]:"Date"}, inplace=True)
+            if maybe:
+                d.rename(columns={maybe[0]: "Date"}, inplace=True)
         d["Branch"] = sheet_name
         meta = config.BRANCHES.get(sheet_name, {})
         d["BranchName"] = meta.get("name", sheet_name)
@@ -167,12 +166,14 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         if "Date" in d.columns:
             d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
         for col in ["SalesTarget","SalesActual","SalesPercent","NOBTarget","NOBActual","NOBPercent","ABVTarget","ABVActual","ABVPercent"]:
-            if col in d.columns: d[col] = _parse_numeric(d[col])
+            if col in d.columns:
+                d[col] = _parse_numeric(d[col])
         combined.append(d)
     return pd.concat(combined, ignore_index=True) if combined else pd.DataFrame()
 
 def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
-    if df.empty: return {}
+    if df.empty:
+        return {}
     k: Dict[str, Any] = {}
     k["total_sales_target"] = float(df.get("SalesTarget", pd.Series(dtype=float)).sum())
     k["total_sales_actual"] = float(df.get("SalesActual", pd.Series(dtype=float)).sum())
@@ -195,11 +196,11 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
         )
     if "Date" in df.columns and df["Date"].notna().any():
         k["date_range"] = {"start": df["Date"].min(), "end": df["Date"].max(), "days": int(df["Date"].dt.date.nunique())}
-    score=w=0.0
-    if k.get("overall_sales_percent",0)>0: score+=min(k["overall_sales_percent"]/100,1.2)*40; w+=40
-    if k.get("overall_nob_percent",0)>0:   score+=min(k["overall_nob_percent"]/100,1.2)*35;   w+=35
-    if k.get("overall_abv_percent",0)>0:   score+=min(k["overall_abv_percent"]/100,1.2)*25;   w+=25
-    k["performance_score"]=(score/w*100) if w>0 else 0.0
+    score = w = 0.0
+    if k.get("overall_sales_percent", 0) > 0: score += min(k["overall_sales_percent"]/100, 1.2) * 40; w += 40
+    if k.get("overall_nob_percent", 0) > 0:   score += min(k["overall_nob_percent"]/100, 1.2) * 35;   w += 35
+    if k.get("overall_abv_percent", 0) > 0:   score += min(k["overall_abv_percent"]/100, 1.2) * 25;   w += 25
+    k["performance_score"] = (score / w * 100) if w > 0 else 0.0
     return k
 
 # ----------------------------
@@ -209,24 +210,32 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str) -> go.Figure:
     if df.empty or "Date" not in df.columns or df["Date"].isna().all():
         return go.Figure()
     agg_func = "sum" if y_col != "ABVActual" else "mean"
-    daily = df.groupby(["Date","BranchName"]).agg({y_col: agg_func}).reset_index()
+    daily = df.groupby(["Date", "BranchName"]).agg({y_col: agg_func}).reset_index()
     if daily.empty:
         return go.Figure()
+
     fig = go.Figure()
     palette = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#14b8a6"]
     for i, br in enumerate(daily["BranchName"].unique()):
         d = daily[daily["BranchName"] == br]
         fig.add_trace(
             go.Scatter(
-                x=d["Date"], y=d[y_col], name=br, mode="lines+markers",
+                x=d["Date"],
+                y=d[y_col],
+                name=br,
+                mode="lines+markers",
                 line=dict(width=3, color=palette[i % len(palette)]),
                 fill="tozeroy",
-                hovertemplate=f"<b>{br}</b><br>Date: %{x|%Y-%m-%d}<br>Value: %{y:,.0f}<extra></extra>",
+                # IMPORTANT: plain string (no f-strings) for Plotly placeholders
+                hovertemplate="<b>" + br + "</b><br>Date: %{x|%Y-%m-%d}<br>Value: %{y:,.0f}<extra></extra>",
             )
         )
     fig.update_layout(
-        title=title, height=420, showlegend=True,
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        title=title,
+        height=420,
+        showlegend=True,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
         legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
     )
     return fig
@@ -260,8 +269,8 @@ def render_branch_cards(bp: pd.DataFrame):
                 r = bp.loc[br]
                 avg_pct = float(np.nanmean([r.get("SalesPercent",0), r.get("NOBPercent",0), r.get("ABVPercent",0)]) or 0)
                 cls = branch_status_class(avg_pct)
-                color = _branch_color_by_name(br)
-                # light gradient using branch color -> transparent white
+                color = _branch_color_by_name(br)  # e.g., "#3b82f6"
+                # very light gradient using 8-digit hex (#RRGGBBAA) with ~12% alpha (1f)
                 st.markdown(
                     f"""
                     <div class="card" style="
@@ -272,7 +281,7 @@ def render_branch_cards(bp: pd.DataFrame):
                         <span class="pill {cls}">{avg_pct:.1f}%</span>
                       </div>
                       <div style="margin-top:8px;font-size:.92rem;color:#6b7280">Overall score</div>
-                      <div style="display:flex;gap:12px;margin-top:10px">
+                      <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap">
                         <div><div style="font-size:.8rem;color:#64748b">Sales %</div><div style="font-weight:700">{r.get('SalesPercent',0):.1f}%</div></div>
                         <div><div style="font-size:.8rem;color:#64748b">NOB %</div><div style="font-weight:700">{r.get('NOBPercent',0):.1f}%</div></div>
                         <div><div style="font-size:.8rem;color:#64748b">ABV %</div><div style="font-weight:700">{r.get('ABVPercent',0):.1f}%</div></div>
@@ -340,7 +349,7 @@ def main():
     st.markdown(f"<div class='title'>📊 {config.PAGE_TITLE}</div>", unsafe_allow_html=True)
     st.success(f"Loaded data for {df['BranchName'].nunique()} branches • {len(df):,} rows")
 
-    # Branch filter (sidebar, pretty pills)
+    # Branch filter (sidebar)
     if "BranchName" in df.columns:
         with st.sidebar:
             all_branches = sorted([b for b in df["BranchName"].dropna().unique()])
@@ -394,7 +403,7 @@ def main():
     with t2:
         st.markdown("#### Choose Metric")
         mtab1, mtab2, mtab3 = st.tabs(["💰 Sales","🛍️ NOB","💎 ABV"])
-        # Time window
+        # Time window for trends
         if "Date" in df.columns and df["Date"].notna().any():
             opts = ["Last 7 Days","Last 30 Days","Last 3 Months","All Time"]
             choice = st.selectbox("Time Period", opts, index=1, key="trend_window")
