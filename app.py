@@ -1,11 +1,3 @@
-# app.py — Al Khair Business Performance (light UI)
-# - Sidebar: Branch filter (soft pill style)
-# - No "Advanced" checkbox; minimal data-source UI in a small expander
-# - No success banner; clean header instead
-# - Light colored Branch Overview cards
-# - Daily Trends tabs (Sales / NOB / ABV) as area charts
-# - Upload Excel fallback (in a compact expander)
-
 from __future__ import annotations
 
 import io
@@ -266,32 +258,118 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
 # =========================================
 # CHARTS (new daily model)
 # =========================================
-def _metric_area(df: pd.DataFrame, y_col: str, title: str) -> go.Figure:
+def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool = True) -> go.Figure:
+    """
+    Render a daily area chart for the given metric. If show_target is True and a corresponding
+    target column exists (e.g. SalesTarget for SalesActual), a secondary line will be drawn
+    for the target values to facilitate comparison between actual and target.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Pre-filtered dataframe containing at least a Date, BranchName and the metric columns.
+    y_col : str
+        Column name for the actual metric values (e.g. 'SalesActual').
+    title : str
+        Plot title.
+    show_target : bool, optional
+        Whether to plot the target line if available. Defaults to True.
+    """
     if df.empty or "Date" not in df.columns or df["Date"].isna().all():
         return go.Figure()
+
+    # Determine aggregation function: ABVActual uses mean (average basket value), others use sum
     agg_func = "sum" if y_col != "ABVActual" else "mean"
-    daily = df.groupby(["Date", "BranchName"]).agg({y_col: agg_func}).reset_index()
-    if daily.empty:
-        return go.Figure()
+    daily_actual = df.groupby(["Date", "BranchName"]).agg({y_col: agg_func}).reset_index()
+    target_col_map = {"SalesActual": "SalesTarget", "NOBActual": "NOBTarget", "ABVActual": "ABVTarget"}
+    target_col = target_col_map.get(y_col)
+
+    # Prepare target data if requested and available
+    daily_target: Optional[pd.DataFrame] = None
+    if show_target and target_col and target_col in df.columns:
+        agg_func_target = "sum" if y_col != "ABVActual" else "mean"
+        daily_target = df.groupby(["Date", "BranchName"]).agg({target_col: agg_func_target}).reset_index()
+
     fig = go.Figure()
     palette = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#14b8a6"]
-    for i, br in enumerate(daily["BranchName"].unique()):
-        d = daily[daily["BranchName"] == br]
+    for i, br in enumerate(sorted(daily_actual["BranchName"].unique())):
+        d_actual = daily_actual[daily_actual["BranchName"] == br]
+        color = palette[i % len(palette)]
+        # Plot actual values as filled area
         fig.add_trace(
             go.Scatter(
-                x=d["Date"],
-                y=d[y_col],
-                name=br,
+                x=d_actual["Date"],
+                y=d_actual[y_col],
+                name=f"{br} - Actual",
                 mode="lines+markers",
-                line=dict(width=3, color=palette[i % len(palette)]),
+                line=dict(width=3, color=color),
                 fill="tozeroy",
-                hovertemplate="<b>" + br + "</b><br>Date: %{x|%Y-%m-%d}<br>Value: %{y:,.0f}<extra></extra>",
+                hovertemplate=f"<b>{br}</b><br>Date: %{{x|%Y-%m-%d}}<br>Actual: %{{y:,.0f}}<extra></extra>",
             )
         )
+        # Plot target line if available
+        if daily_target is not None:
+            d_target = daily_target[daily_target["BranchName"] == br]
+            fig.add_trace(
+                go.Scatter(
+                    x=d_target["Date"],
+                    y=d_target[target_col],
+                    name=f"{br} - Target",
+                    mode="lines",
+                    line=dict(width=2, color=color, dash="dash"),
+                    fill=None,
+                    hovertemplate=f"<b>{br}</b><br>Date: %{{x|%Y-%m-%d}}<br>Target: %{{y:,.0f}}<extra></extra>",
+                    showlegend=False if len(sorted(daily_actual["BranchName"].unique())) > 1 else True,
+                )
+            )
     fig.update_layout(
         title=title,
         height=420,
         showlegend=True,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+        xaxis_title="Date",
+        yaxis_title="Value",
+    )
+    return fig
+
+
+def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
+    """
+    Create a grouped bar chart comparing Sales %, NOB %, and ABV % across branches.
+
+    Parameters
+    ----------
+    bp : pd.DataFrame
+        Branch performance summary indexed by BranchName with percent columns.
+    """
+    if bp.empty:
+        return go.Figure()
+    metrics = {
+        "SalesPercent": "Sales %",
+        "NOBPercent": "NOB %",
+        "ABVPercent": "ABV %",
+    }
+    fig = go.Figure()
+    x = bp.index.tolist()
+    palette = ["#3b82f6", "#10b981", "#f59e0b"]
+    for i, (col, label) in enumerate(metrics.items()):
+        y = bp[col].tolist()
+        fig.add_trace(
+            go.Bar(
+                x=x,
+                y=y,
+                name=label,
+                marker=dict(color=palette[i % len(palette)]),
+            )
+        )
+    fig.update_layout(
+        barmode="group",
+        title="Branch Performance Comparison (%)",
+        xaxis_title="Branch",
+        yaxis_title="Percent",
+        height=400,
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
         legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
@@ -361,9 +439,9 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
     c1.metric("💰 Total Sales", f"SAR {k.get('total_sales_actual',0):,.0f}", delta=f"vs Target: {k.get('overall_sales_percent',0):.1f}%")
     variance_color = "normal" if k.get("total_sales_variance", 0) >= 0 else "inverse"
     c2.metric("📊 Sales Variance", f"SAR {k.get('total_sales_variance',0):,.0f}", delta=f"{k.get('overall_sales_percent',0)-100:+.1f}%", delta_color=variance_color)
-    nob_color = "normal" if k.get("overall_nob_percent", 0) >= 90 else "inverse"
+    nob_color = "normal" if k.get("overall_nob_percent", 0) >= config.TARGETS['nob_achievement'] else "inverse"
     c3.metric("🛍️ Total Baskets", f"{k.get('total_nob_actual',0):,.0f}", delta=f"Achievement: {k.get('overall_nob_percent',0):.1f}%", delta_color=nob_color)
-    abv_color = "normal" if k.get("overall_abv_percent", 0) >= 90 else "inverse"
+    abv_color = "normal" if k.get("overall_abv_percent", 0) >= config.TARGETS['abv_achievement'] else "inverse"
     c4.metric("💎 Avg Basket Value", f"SAR {k.get('avg_abv_actual',0):,.2f}", delta=f"vs Target: {k.get('overall_abv_percent',0):.1f}%", delta_color=abv_color)
     score_color = "normal" if k.get("performance_score", 0) >= 80 else "off"
     c5.metric("⭐ Performance Score", f"{k.get('performance_score',0):.0f}/100", delta="Weighted Score", delta_color=score_color)
@@ -389,6 +467,10 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
             .round(1),
             use_container_width=True,
         )
+        # New chart: branch performance comparison bar chart
+        st.markdown("### 📉 Branch Performance Comparison")
+        fig_cmp = _branch_comparison_chart(bp)
+        st.plotly_chart(fig_cmp, use_container_width=True, config={"displayModeBar": False})
 
 
 # =========================================
@@ -498,11 +580,11 @@ def main():
             f = df.copy()
 
         with mtab1:
-            st.plotly_chart(_metric_area(f, "SalesActual", "Daily Sales (Area)"), use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(_metric_area(f, "SalesActual", "Daily Sales (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
         with mtab2:
-            st.plotly_chart(_metric_area(f, "NOBActual", "Number of Baskets (Area)"), use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(_metric_area(f, "NOBActual", "Number of Baskets (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
         with mtab3:
-            st.plotly_chart(_metric_area(f, "ABVActual", "Average Basket Value (Area)"), use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(_metric_area(f, "ABVActual", "Average Basket Value (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
 
     with t3:
         if df.empty:
