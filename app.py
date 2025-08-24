@@ -98,24 +98,24 @@ def apply_modern_css():
         .main {
             padding: 0 !important;
             margin: 0 !important;
-            margin-top: -100px !important;
-            padding-top: 0 !important;
         }
         
         .main .block-container { 
             padding: 0 !important;
             max-width: 100% !important;
             margin: 0 !important;
-            margin-top: 0 !important;
-            padding-top: 100px !important;
+            margin-top: -200px !important;
+            padding-top: 200px !important;
         }
         
-        /* Dashboard Layout - Simple approach */
+        /* Dashboard Layout - Move up aggressively */
         .dashboard-layout {
             display: flex;
             min-height: 100vh;
             margin: 0;
             padding: 0;
+            margin-top: -200px;
+            padding-top: 200px;
         }
         
         /* Left Sidebar */
