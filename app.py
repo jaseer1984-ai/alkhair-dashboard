@@ -50,7 +50,7 @@ def apply_modern_css():
         
         html, body, [data-testid="stAppViewContainer"] { 
             font-family: 'Poppins', sans-serif !important;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            background: #ffffff !important;
             color: #1a202c;
         }
         
@@ -59,32 +59,29 @@ def apply_modern_css():
         }
         
         .main .block-container { 
-            padding: 0.5rem !important;
-            max-width: 100% !important;
-            margin: 0 !important;
+            padding: 1rem 2rem !important;
+            max-width: 1400px !important;
+            margin: 0 auto !important;
         }
         
         /* Dashboard Container */
         .dashboard-container {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 25px;
-            padding: 2rem;
-            margin: 1rem;
-            backdrop-filter: blur(20px);
-            box-shadow: 0 20px 60px rgba(0,0,0,0.1);
-            border: 1px solid rgba(255,255,255,0.3);
+            background: #ffffff;
+            padding: 0;
+            margin: 0;
         }
         
         /* Header */
         .modern-header {
             text-align: center;
             padding: 2rem 0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 20px;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            border-radius: 15px;
             color: white;
             margin-bottom: 2rem;
             position: relative;
             overflow: hidden;
+            box-shadow: 0 4px 20px rgba(99,102,241,0.3);
         }
         
         .modern-header::before {
@@ -124,15 +121,16 @@ def apply_modern_css():
         }
         
         .branch-card {
-            background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
-            border-radius: 20px;
+            background: #ffffff;
+            border-radius: 15px;
             padding: 1.5rem;
             text-align: center;
             cursor: pointer;
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            border: 2px solid transparent;
+            border: 2px solid #e5e7eb;
             position: relative;
             overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
         }
         
         .branch-card::before {
@@ -159,8 +157,8 @@ def apply_modern_css():
         
         .branch-card.selected {
             border-color: var(--branch-color);
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-            background: linear-gradient(145deg, #f0f9ff 0%, #e0f2fe 100%);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+            background: #f8fafc;
         }
         
         .branch-card.selected::before {
@@ -188,14 +186,15 @@ def apply_modern_css():
         }
         
         .kpi-card {
-            background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
-            border-radius: 25px;
+            background: #ffffff;
+            border-radius: 20px;
             padding: 2rem;
             text-align: center;
             position: relative;
             overflow: hidden;
             transition: all 0.3s ease;
-            border: 1px solid rgba(255,255,255,0.5);
+            border: 1px solid #e5e7eb;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
         }
         
         .kpi-card::before {
@@ -267,13 +266,15 @@ def apply_modern_css():
         }
         
         .performance-card {
-            background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
-            border-radius: 25px;
+            background: #ffffff;
+            border-radius: 20px;
             padding: 2rem;
             position: relative;
             overflow: hidden;
             border-left: 6px solid var(--performance-color);
             transition: all 0.3s ease;
+            border: 1px solid #e5e7eb;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
         }
         
         .performance-card:hover {
@@ -341,11 +342,12 @@ def apply_modern_css():
         
         /* Insights */
         .insights-container {
-            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-            border-radius: 20px;
+            background: #f8fafc;
+            border-radius: 15px;
             padding: 2rem;
             margin: 2rem 0;
-            border: 1px solid rgba(99,102,241,0.2);
+            border: 1px solid #e5e7eb;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
         }
         
         .insight-item {
@@ -361,10 +363,11 @@ def apply_modern_css():
         
         /* Streamlit Overrides */
         .stTabs [data-baseweb="tab-list"] {
-            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-            border-radius: 15px;
+            background: #f8fafc;
+            border-radius: 12px;
             padding: 0.5rem;
             gap: 0.5rem;
+            border: 1px solid #e5e7eb;
         }
         
         .stTabs [data-baseweb="tab"] {
@@ -379,7 +382,7 @@ def apply_modern_css():
         .stTabs [aria-selected="true"] {
             background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
             color: white !important;
-            box-shadow: 0 5px 15px rgba(99,102,241,0.4) !important;
+            box-shadow: 0 4px 12px rgba(99,102,241,0.3) !important;
         }
         
         /* Date inputs */
@@ -420,13 +423,13 @@ def apply_modern_css():
             padding: 1rem;
             font-size: 1.2rem;
             cursor: pointer;
-            box-shadow: 0 10px 20px rgba(99,102,241,0.3);
+            box-shadow: 0 4px 15px rgba(99,102,241,0.3);
             transition: all 0.3s ease;
         }
         
         .refresh-btn:hover {
-            transform: scale(1.1);
-            box-shadow: 0 15px 30px rgba(99,102,241,0.4);
+            transform: scale(1.05);
+            box-shadow: 0 6px 20px rgba(99,102,241,0.4);
         }
         
         /* Auto refresh indicator */
@@ -441,8 +444,7 @@ def apply_modern_css():
             font-size: 0.9rem;
             font-weight: 600;
             z-index: 1000;
-            backdrop-filter: blur(10px);
-            box-shadow: 0 5px 15px rgba(16,185,129,0.3);
+            box-shadow: 0 4px 12px rgba(16,185,129,0.3);
         }
         
         /* Hide Streamlit elements */
