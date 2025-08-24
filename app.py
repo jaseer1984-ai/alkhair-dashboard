@@ -946,23 +946,20 @@ def render_overview_tab(filtered_data: pd.DataFrame, kpis: Dict[str, Any]):
     
     # Primary KPIs Row 1
     st.markdown("### Financial Performance")
-    kpi_row1 = [
-        ("💰 Total Sales", f"SAR {kpis['actual_sales']:,.0f}", config.KPI_COLORS["sales"]),
-        ("🎯 Target Sales", f"SAR {kpis['target_sales']:,.0f}", config.KPI_COLORS["target"]),
-        ("📊 Sales Variance", f"{kpis['sales_variance_pct']:+.1f}%", 
-         config.KPI_COLORS["variance"] if kpis['sales_variance_pct'] >= 0 else "#fee2e2"),
-        ("💎 Gross Profit", f"SAR {kpis['gross_profit']:,.0f}", config.KPI_COLORS["profit"]),
-        ("📈 Gross Margin", f"{kpis['gross_margin']:.1f}%", config.KPI_COLORS["profit"])
-    ]
     
-    cols = st.columns(len(kpi_row1))
-    for (label, value, color), col in zip(kpi_row1, cols):
-        col.markdown(f"""
-        <div class="kpi-tile" style="background:{color}">
-            <div style="font-size:13px; color:#334155; font-weight:700;">{label}</div>
-            <div style="font-size:24px; line-height:1; margin-top:4px; color:#0f172a;">{value}</div>
-        </div>
-        """, unsafe_allow_html=True)
+    cols = st.columns(5)
+    with cols[0]:
+        st.metric("💰 Total Sales", f"SAR {kpis['actual_sales']:,.0f}")
+    with cols[1]:
+        st.metric("🎯 Target Sales", f"SAR {kpis['target_sales']:,.0f}")
+    with cols[2]:
+        variance_delta = f"{kpis['sales_variance_pct']:+.1f}%" if kpis['target_sales'] > 0 else None
+        st.metric("📊 Sales Variance", f"SAR {kpis['sales_variance']:,.0f}", delta=variance_delta)
+    with cols[3]:
+        st.metric("💎 Gross Profit", f"SAR {kpis['gross_profit']:,.0f}")
+    with cols[4]:
+        margin_delta = f"{kpis['gross_margin']:.1f}%" if kpis['gross_margin'] > 0 else None
+        st.metric("📈 Gross Margin", margin_delta or "0.0%")
     
     # Secondary KPIs Row 2
     st.markdown("### Operations & Customer Metrics")
@@ -977,27 +974,23 @@ def render_overview_tab(filtered_data: pd.DataFrame, kpis: Dict[str, Any]):
     cols = st.columns(len(kpi_row2))
     for (label, value, color), col in zip(kpi_row2, cols):
         # Add performance indicator for conversion rate
-        indicator_class = ""
-        indicator_symbol = ""
+        indicator_html = ""
         if "Conversion Rate" in label:
             if kpis['conversion_rate'] >= config.TARGET_THRESHOLDS["conversion_rate"]:
-                indicator_class = "indicator-good"
-                indicator_symbol = "✓"
+                indicator_html = '<span class="performance-indicator indicator-good">✓</span>'
             elif kpis['conversion_rate'] >= config.TARGET_THRESHOLDS["conversion_rate"] * 0.7:
-                indicator_class = "indicator-warning"
-                indicator_symbol = "!"
+                indicator_html = '<span class="performance-indicator indicator-warning">!</span>'
             else:
-                indicator_class = "indicator-poor"
-                indicator_symbol = "⚠"
+                indicator_html = '<span class="performance-indicator indicator-poor">⚠</span>'
         
         col.markdown(f"""
         <div class="kpi-tile" style="background:{color}">
-            <div style="font-size:13px; color:#334155; font-weight:700;">{label}
-                <span class="performance-indicator {indicator_class}">
-                    {indicator_symbol}
-                </span>
+            <div style="font-size:13px; color:#334155; font-weight:700;">
+                {label}{indicator_html}
             </div>
-            <div style="font-size:24px; line-height:1; margin-top:4px; color:#0f172a;">{value}</div>
+            <div style="font-size:24px; line-height:1; margin-top:4px; color:#0f172a;">
+                {value}
+            </div>
         </div>
         """, unsafe_allow_html=True)
     
@@ -1014,9 +1007,13 @@ def render_overview_tab(filtered_data: pd.DataFrame, kpis: Dict[str, Any]):
     cols = st.columns(len(kpi_row3))
     for (label, value, color), col in zip(kpi_row3, cols):
         col.markdown(f"""
-        <div class="kpi-tile" style="background:{color}">
-            <div style="font-size:13px; color:#334155; font-weight:700;">{label}</div>
-            <div style="font-size:24px; line-height:1; margin-top:4px; color:#0f172a;">{value}</div>
+        <div class="kpi-tile" style="background-color:{color};">
+            <div style="font-size:13px; color:#334155; font-weight:700; margin-bottom:4px;">
+                {label}
+            </div>
+            <div style="font-size:24px; line-height:1; color:#0f172a; font-weight:800;">
+                {value}
+            </div>
         </div>
         """, unsafe_allow_html=True)
     
