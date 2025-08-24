@@ -42,13 +42,43 @@ def apply_modern_css():
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap');
         
+        /* Aggressive removal of ALL possible spacing */
         * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
         }
         
-        html, body, [data-testid="stAppViewContainer"] { 
+        /* Re-apply necessary spacing only where needed */
+        .kpi-card, .performance-card, .branch-card {
+            margin: 0 !important;
+            padding: 2rem !important;
+        }
+        
+        .sidebar-section {
+            margin-bottom: 2rem !important;
+        }
+        
+        .sidebar-stat {
+            padding: 0.75rem 0 !important;
+        }
+        
+        .performance-metrics {
+            gap: 1.5rem !important;
+        }
+        
+        .kpi-grid, .performance-grid, .branch-grid {
+            gap: 2rem !important;
+            margin: 2rem 0 !important;
+        }
+        
+        html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            height: 100% !important;
+        }
+        
+        [data-testid="stAppViewContainer"] { 
             font-family: 'Poppins', sans-serif !important;
             background: #ffffff !important;
             color: #1a202c;
@@ -56,27 +86,36 @@ def apply_modern_css():
             padding: 0 !important;
         }
         
+        .stApp {
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        
         .stApp > header {
-            background-color: transparent !important;
-            height: 0 !important;
+            display: none !important;
+        }
+        
+        .main {
+            padding: 0 !important;
+            margin: 0 !important;
+            margin-top: -100px !important;
+            padding-top: 0 !important;
         }
         
         .main .block-container { 
             padding: 0 !important;
             max-width: 100% !important;
             margin: 0 !important;
-            padding-top: 0 !important;
+            margin-top: 0 !important;
+            padding-top: 100px !important;
         }
         
-        /* Remove Streamlit's default padding */
-        .main > div {
-            padding-top: 0 !important;
-        }
-        
-        /* Dashboard Layout */
+        /* Dashboard Layout - Simple approach */
         .dashboard-layout {
             display: flex;
             min-height: 100vh;
+            margin: 0;
+            padding: 0;
         }
         
         /* Left Sidebar */
@@ -84,11 +123,13 @@ def apply_modern_css():
             width: 280px;
             background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
             border-right: 1px solid #e2e8f0;
-            padding: 2rem 1.5rem;
+            padding: 1rem 1.5rem;
             position: fixed;
             height: 100vh;
             overflow-y: auto;
             z-index: 100;
+            top: 0;
+            left: 0;
         }
         
         .sidebar-logo {
@@ -184,18 +225,19 @@ def apply_modern_css():
         /* Main Content */
         .main-content {
             margin-left: 280px;
-            padding: 2rem;
+            padding: 1rem 2rem;
             flex: 1;
+            width: calc(100% - 280px);
         }
         
         /* Header */
         .modern-header {
             text-align: center;
-            padding: 2rem 0;
+            padding: 1.5rem 0;
             background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
             border-radius: 15px;
             color: white;
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
             position: relative;
             overflow: hidden;
             box-shadow: 0 4px 20px rgba(99,102,241,0.3);
@@ -213,7 +255,7 @@ def apply_modern_css():
         }
         
         .header-title {
-            font-size: 3rem;
+            font-size: 2.5rem;
             font-weight: 800;
             margin-bottom: 0.5rem;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
@@ -222,7 +264,7 @@ def apply_modern_css():
         }
         
         .header-subtitle {
-            font-size: 1.2rem;
+            font-size: 1.1rem;
             opacity: 0.9;
             font-weight: 300;
             position: relative;
@@ -598,10 +640,41 @@ def apply_modern_css():
             box-shadow: 0 4px 12px rgba(16,185,129,0.3);
         }
         
-        /* Hide Streamlit elements */
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
-        .stDeployButton {display: none;}
+        /* Hide Streamlit elements completely */
+        #MainMenu {display: none !important;}
+        footer {display: none !important;}
+        .stDeployButton {display: none !important;}
+        header[data-testid="stHeader"] {display: none !important;}
+        [data-testid="stToolbar"] {display: none !important;}
+        [data-testid="stDecoration"] {display: none !important;}
+        .stActionButton {display: none !important;}
+        
+        /* Force remove all top spacing */
+        [data-testid="stAppViewContainer"] {
+            padding-top: 0 !important;
+            margin-top: 0 !important;
+            position: relative !important;
+            top: 0 !important;
+        }
+        
+        [data-testid="stAppViewContainer"] > .main {
+            padding-top: 0 !important;
+            margin-top: 0 !important;
+        }
+        
+        [data-testid="stSidebar"] {
+            display: none !important;
+        }
+        
+        /* Force the entire app to start from top */
+        * {
+            margin-top: 0 !important;
+        }
+        
+        *:first-child {
+            margin-top: 0 !important;
+            padding-top: 0 !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
