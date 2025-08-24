@@ -29,7 +29,7 @@ class Config:
     # Multiple data sources
     DATA_SOURCES = {
         "primary": "https://docs.google.com/spreadsheets/d/e/2PACX-1vSW_ui1m_393ipZv8NAliu1rly6zeifFxMfOWpQF17hjVIDa9Ll8PiGCaz8gTRkMQ/pub?output=csv",
-        "dsr_report": "https://docs.google.com/spreadsheets/d/e/2PACX-1vS2Nyi0iNbPJAvwkshvYsglPgSF76MDS51EbSuB8Wef3OA8oQc18xP6xLpe6-sNYQ/pub?output=csv"
+        "dsr_report": "https://docs.google.com/spreadsheets/d/e/2PACX-1vQG7boLWl2bNLCPR05NXv6EFpPPcFfXsiXPQ7rAGYr3q8Nkc2Ijg8BqEwVofcMLSg/pub?output=csv"
     }
     
     # Enhanced column aliases for comprehensive data mapping
@@ -1694,3 +1694,4 @@ if __name__ == "__main__":
         st.error(f"❌ Application Error: {str(e)}")
         st.info("Please refresh the page or contact support if the issue persists.")
         st.stop()
+
