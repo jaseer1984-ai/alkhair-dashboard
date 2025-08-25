@@ -34,7 +34,7 @@ st.set_page_config(page_title=config.PAGE_TITLE, layout=config.LAYOUT, initial_s
 
 
 # =========================================
-# CSS (colored tabs + tidy UI + modern sidebar)
+# CSS (UI + modern sidebar like the preview)
 # =========================================
 def apply_css():
     st.markdown(
@@ -50,7 +50,7 @@ def apply_css():
         [data-testid="metric-container"] {
             background:#fff !important; border-radius:16px !important; border:1px solid rgba(0,0,0,.06)!important; padding:18px!important;
         }
-        /* Soft light cards */
+        /* Soft cards */
         .card { background:#fcfcfc; border:1px solid #f1f5f9; border-radius:16px; padding:16px; height:100%; }
 
         .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-weight:700; font-size:.80rem; }
@@ -62,9 +62,10 @@ def apply_css():
         /* Colored Tabs */
         .stTabs [data-baseweb="tab-list"] { gap: 8px; border-bottom: none; }
         .stTabs [data-baseweb="tab"] {
-            border-radius: 10px 10px 0 0 !important;
-            padding: 10px 18px !important; font-weight: 700 !important;
-            background: #f3f4f6 !important; color: #374151 !important; border: 1px solid #e5e7eb !important; border-bottom: none !important;
+          border-radius: 10px 10px 0 0 !important;
+          padding: 10px 18px !important; font-weight: 700 !important;
+          background: #f3f4f6 !important; color: #374151 !important;
+          border: 1px solid #e5e7eb !important; border-bottom: none !important;
         }
         .stTabs [data-baseweb="tab"]:hover { background:#e5e7eb !important; }
         .stTabs [aria-selected="true"] { color: #fff !important; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
@@ -72,58 +73,21 @@ def apply_css():
         .stTabs [data-baseweb="tab"]:nth-child(2)[aria-selected="true"] { background: linear-gradient(135deg,#3b82f6 0%,#60a5fa 100%) !important; border-color:#60a5fa !important; }
         .stTabs [data-baseweb="tab"]:nth-child(3)[aria-selected="true"] { background: linear-gradient(135deg,#8b5cf6 0%,#a78bfa 100%) !important; border-color:#a78bfa !important; }
 
-        /* ===================== Modern Sidebar ===================== */
+        /* ================= Sidebar (preview model) ================= */
         [data-testid="stSidebar"] {
-          background: #0b1e3b; /* deep navy like the screenshot */
-          border-right: 0;
-          min-width: 280px;
-          max-width: 300px;
-          color:#e5e7eb;
+          background: #f7f9fc;
+          border-right: 1px solid #e5e7eb;
+          min-width: 280px; max-width: 320px;
         }
-        [data-testid="stSidebar"] .block-container { padding: 18px 14px 20px; }
+        [data-testid="stSidebar"] .block-container { padding: 18px 16px 20px; }
 
-        .sb-brand {
-          display:flex; align-items:center; gap:10px;
-          background: linear-gradient(135deg, #0f2a56 0%, #0b1e3b 100%);
-          border:1px solid rgba(255,255,255,0.06);
-          border-radius:14px; padding:12px 12px; margin-bottom:14px;
-        }
-        .sb-logo {
-          width:36px; height:36px; display:flex; align-items:center; justify-content:center;
-          background:#1f3f77; color:#fff; border-radius:10px; font-weight:900;
-          box-shadow: inset 0 0 0 2px rgba(255,255,255,0.08);
-        }
-        .sb-title { font-weight:900; letter-spacing:.04em; font-size:1rem; color:#fff; }
-        .sb-sub { font-size:.78rem; color:#a6b3c6; margin-top:2px; }
-
-        .sb-menu { margin: 10px 0 8px; display:flex; flex-direction:column; gap:8px; }
-        .sb-item {
-          display:flex; align-items:center; gap:10px;
-          background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.06);
-          color:#dbe3f0; padding:9px 12px; border-radius:12px; font-weight:600; font-size:.92rem;
-        }
-        .sb-item:hover { background: rgba(255,255,255,0.07); }
-        .sb-item .ico {
-          width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center;
-          background: rgba(255,255,255,0.06);
-        }
-        .sb-item.active {
-          background: linear-gradient(135deg,#3b82f6 0%, #60a5fa 100%);
-          color:#0b1e3b;
-          border:none;
-        }
-        .sb-hr { height:1px; background:rgba(255,255,255,.10); border-radius:999px; margin:10px 2px; }
-
-        .sb-card {
-          background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);
-          border-radius:14px; padding:12px; color:#e5e7eb;
-        }
-        .sb-btn {
-          width:100%; border:none; border-radius:12px; padding:10px 12px; font-weight:700;
-          background:#ffffff; color:#0b1e3b;
-        }
-        .sb-btn:hover { filter:brightness(.96); }
-        .sb-foot { margin-top:14px; font-size:.75rem; color:#a6b3c6; text-align:center; }
+        .sb-title { display:flex; gap:10px; align-items:center; font-weight:900; font-size:1.05rem; }
+        .sb-subtle { color:#6b7280; font-size:.85rem; margin:6px 0 12px; }
+        .sb-section { font-size:.80rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; color:#64748b; margin:12px 4px 6px; }
+        .sb-card { background:#ffffff; border:1px solid #eef2f7; border-radius:14px; padding:12px; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
+        .sb-hr { height:1px; background:#e5e7eb; margin:12px 0; border-radius:999px; }
+        .sb-pill { border:1px solid #e5e7eb; background:#fff; border-radius:999px; padding:6px 10px; font-size:.85rem; display:block; margin:4px 0; }
+        .sb-foot { margin-top:10px; font-size:.75rem; color:#9ca3af; text-align:center; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -469,7 +433,7 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
         st.plotly_chart(fig_cmp, use_container_width=True, config={"displayModeBar": False})
 
 
-# -------- Branch filter via toggle buttons (no multiselect) --------
+# -------- Branch filter via toggle buttons (kept same) --------
 def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> List[str]:
     if "BranchName" not in df.columns:
         return []
@@ -510,39 +474,7 @@ def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> L
 def main():
     apply_css()
 
-    # Sidebar (visual only – behavior unchanged)
-    with st.sidebar:
-        st.markdown(
-            """
-            <div class="sb-brand">
-              <div class="sb-logo">AK</div>
-              <div>
-                <div class="sb-title">AL KHAIR BUSINESS</div>
-                <div class="sb-sub">Filters affect all tabs</div>
-              </div>
-            </div>
-
-            <div class="sb-menu">
-              <div class="sb-item active"><div class="ico">🏠</div> Overview</div>
-              <div class="sb-item"><div class="ico">📈</div> Trends</div>
-              <div class="sb-item"><div class="ico">🏪</div> Branches</div>
-              <div class="sb-item"><div class="ico">📤</div> Export</div>
-            </div>
-
-            <div class="sb-hr"></div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        if st.button("🔄 Refresh data", key="refresh_btn", help="Reload Google Sheet"):
-            load_workbook_from_gsheet.clear()
-            st.session_state.pop("start_date", None)
-            st.session_state.pop("end_date", None)
-            st.rerun()
-
-        st.markdown('<div class="sb-foot">© 2025 • AL KHAIR</div>', unsafe_allow_html=True)
-
-    # Load data
+    # Load data first (so sidebar ranges/branches know bounds)
     sheets_map = load_workbook_from_gsheet(config.DEFAULT_PUBLISHED_URL)
     if not sheets_map:
         st.warning("No non-empty sheets found.")
@@ -553,6 +485,126 @@ def main():
         st.error("Could not process data. Check column names and sheet structure.")
         st.stop()
 
+    # Initialize branch selection if not set
+    all_branches = sorted(df_all["BranchName"].dropna().unique()) if "BranchName" in df_all else []
+    if "selected_branches" not in st.session_state:
+        st.session_state.selected_branches = list(all_branches)
+
+    # A temp df to compute sidebar bounds based on current branch selection
+    df_for_bounds = df_all[df_all["BranchName"].isin(st.session_state.selected_branches)].copy() if all_branches else df_all.copy()
+    if "Date" in df_for_bounds.columns and df_for_bounds["Date"].notna().any():
+        dmin_sb = df_for_bounds["Date"].min().date()
+        dmax_sb = df_for_bounds["Date"].max().date()
+    else:
+        dmin_sb = dmax_sb = datetime.today().date()
+
+    # Initialize date session values if missing
+    if "start_date" not in st.session_state:
+        st.session_state.start_date = dmin_sb
+    if "end_date" not in st.session_state:
+        st.session_state.end_date = dmax_sb
+
+    # ---------------- Sidebar (preview model) ----------------
+    with st.sidebar:
+        st.markdown('<div class="sb-title">📊 <span>AL KHAIR DASHBOARD</span></div>', unsafe_allow_html=True)
+        st.markdown('<div class="sb-subtle">Filters affect all tabs.</div>', unsafe_allow_html=True)
+
+        # Actions
+        st.markdown('<div class="sb-section">Actions</div>', unsafe_allow_html=True)
+        cols = st.columns(2)
+        if cols[0].button("🔄 Refresh Data", use_container_width=True):
+            load_workbook_from_gsheet.clear()
+            st.session_state.pop("start_date", None)
+            st.session_state.pop("end_date", None)
+            st.rerun()
+        if cols[1].button("🧹 Reset Filters", use_container_width=True):
+            st.session_state.selected_branches = list(all_branches)
+            st.session_state.start_date = dmin_sb
+            st.session_state.end_date = dmax_sb
+            st.rerun()
+
+        st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
+
+        # Quick Range
+        st.markdown('<div class="sb-section">Quick Range</div>', unsafe_allow_html=True)
+        preset = st.radio(
+            label="",
+            options=["Last 7d", "Last 30d", "This Month", "YTD", "All Time"],
+            index=1,
+            key="sb_quick_range",
+        )
+        # Apply preset to session dates (clamped to current branch bounds)
+        today = dmax_sb
+        if preset == "Last 7d":
+            st.session_state.start_date, st.session_state.end_date = max(dmin_sb, today - timedelta(days=7)), today
+        elif preset == "Last 30d":
+            st.session_state.start_date, st.session_state.end_date = max(dmin_sb, today - timedelta(days=30)), today
+        elif preset == "This Month":
+            first = today.replace(day=1)
+            st.session_state.start_date, st.session_state.end_date = max(dmin_sb, first), today
+        elif preset == "YTD":
+            first = today.replace(month=1, day=1)
+            st.session_state.start_date, st.session_state.end_date = max(dmin_sb, first), today
+        elif preset == "All Time":
+            st.session_state.start_date, st.session_state.end_date = dmin_sb, dmax_sb
+
+        # Custom Date (mirrors main pickers)
+        st.markdown('<div class="sb-section">Custom Date</div>', unsafe_allow_html=True)
+        _sd = st.date_input("Start:", value=st.session_state.start_date, min_value=dmin_sb, max_value=dmax_sb, key="sb_sd")
+        _ed = st.date_input("End:",   value=st.session_state.end_date,   min_value=dmin_sb, max_value=dmax_sb, key="sb_ed")
+        st.session_state.start_date = max(dmin_sb, min(_sd, dmax_sb))
+        st.session_state.end_date   = max(dmin_sb, min(_ed, dmax_sb))
+        if st.session_state.start_date > st.session_state.end_date:
+            st.session_state.start_date, st.session_state.end_date = dmin_sb, dmax_sb
+
+        st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
+
+        # Branches (checkboxes bound to same selection)
+        st.markdown('<div class="sb-section">Branches</div>', unsafe_allow_html=True)
+        changed = False
+        for b in all_branches:
+            chk = st.checkbox(b, value=(b in st.session_state.selected_branches), key=f"sb_br_{b}")
+            if chk and b not in st.session_state.selected_branches:
+                st.session_state.selected_branches.append(b); changed = True
+            if (not chk) and b in st.session_state.selected_branches:
+                st.session_state.selected_branches.remove(b); changed = True
+        if changed:
+            # reset dates to branch bounds to avoid out-of-window issues
+            st.session_state.start_date = dmin_sb
+            st.session_state.end_date = dmax_sb
+            st.rerun()
+
+        st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
+
+        # Settings (placeholders – stored in session, not used elsewhere)
+        st.markdown('<div class="sb-section">Settings</div>', unsafe_allow_html=True)
+        st.selectbox("Theme", options=["Light", "Dark"], index=0, key="sb_theme")
+        st.selectbox("Auto-refresh", options=["Off", "5m", "15m", "30m"], index=2, key="sb_autorefresh")
+
+        st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
+
+        # Snapshot (simple, from current selection + dates)
+        df_snap = df_for_bounds.copy()
+        if "Date" in df_snap.columns and df_snap["Date"].notna().any():
+            mask_snap = (df_snap["Date"].dt.date >= st.session_state.start_date) & (df_snap["Date"].dt.date <= st.session_state.end_date)
+            df_snap = df_snap.loc[mask_snap]
+        snap = calc_kpis(df_snap)
+        st.markdown('<div class="sb-section">Today\'s Snapshot</div>', unsafe_allow_html=True)
+        with st.container():
+            st.markdown(
+                f"""
+                <div class="sb-card">
+                  <div>💰 <b>Sales:</b> SAR {snap.get('total_sales_actual',0):,.0f}</div>
+                  <div>📊 <b>Variance:</b> {snap.get('overall_sales_percent',0)-100:+.1f}%</div>
+                  <div>🛍️ <b>Baskets:</b> {snap.get('total_nob_actual',0):,.0f}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        st.markdown('<div class="sb-foot">UI preview • v2.0</div>', unsafe_allow_html=True)
+
+    # ------- Main header -------
     st.markdown(f"<div class='title'>📊 {config.PAGE_TITLE}</div>", unsafe_allow_html=True)
     date_span = ""
     if "Date" in df_all.columns and df_all["Date"].notna().any():
@@ -562,10 +614,11 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # Branch filter
+    # Apply branch filter to working df (keep your original flow)
     df = df_all.copy()
     if "BranchName" in df.columns:
         prev_sel = tuple(st.session_state.get("selected_branches", []))
+        # Keep your original on-page branch toggles (unchanged)
         selected = render_branch_filter_buttons(df)
         if selected:
             df = df[df["BranchName"].isin(selected)].copy()
@@ -576,7 +629,7 @@ def main():
             st.warning("No rows after branch filter.")
             st.stop()
 
-    # --- Date filter (stateful + auto-clamp) ---
+    # --- Date filter (stateful + auto-clamp; unchanged) ---
     if "Date" in df.columns and df["Date"].notna().any():
         dmin = df["Date"].min().date()
         dmax = df["Date"].max().date()
@@ -625,7 +678,7 @@ def main():
             st.warning("No rows in selected date range.")
             st.stop()
 
-    # KPIs + Quick insights
+    # KPIs + Quick insights (unchanged)
     k = calc_kpis(df)
     with st.expander("⚡ Quick Insights", expanded=True):
         insights: List[str] = []
@@ -644,7 +697,7 @@ def main():
         else:
             st.write("All metrics look healthy for the current selection.")
 
-    # Tabs
+    # Tabs (unchanged)
     t1, t2, t3 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "📥 Export"])
     with t1:
         render_overview(df, k)
@@ -656,33 +709,22 @@ def main():
             opts = ["Last 7 Days", "Last 30 Days", "Last 3 Months", "All Time"]
             choice = st.selectbox("Time Period", opts, index=1, key="trend_window")
             today = (df["Date"].max() if df["Date"].notna().any() else pd.Timestamp.today()).date()
-            start = {
-                "Last 7 Days": today - timedelta(days=7),
-                "Last 30 Days": today - timedelta(days=30),
-                "Last 3 Months": today - timedelta(days=90),
-            }.get(choice, df["Date"].min().date())
+            start = {"Last 7 Days": today - timedelta(days=7),
+                     "Last 30 Days": today - timedelta(days=30),
+                     "Last 3 Months": today - timedelta(days=90)}.get(choice, df["Date"].min().date())
             f = df[(df["Date"].dt.date >= start) & (df["Date"].dt.date <= today)].copy()
         else:
             f = df.copy()
 
         with mtab1:
-            st.plotly_chart(
-                _metric_area(f, "SalesActual", "Daily Sales (Actual vs Target)"),
-                use_container_width=True,
-                config={"displayModeBar": False},
-            )
+            st.plotly_chart(_metric_area(f, "SalesActual", "Daily Sales (Actual vs Target)"),
+                            use_container_width=True, config={"displayModeBar": False})
         with mtab2:
-            st.plotly_chart(
-                _metric_area(f, "NOBActual", "Number of Baskets (Actual vs Target)"),
-                use_container_width=True,
-                config={"displayModeBar": False},
-            )
+            st.plotly_chart(_metric_area(f, "NOBActual", "Number of Baskets (Actual vs Target)"),
+                            use_container_width=True, config={"displayModeBar": False})
         with mtab3:
-            st.plotly_chart(
-                _metric_area(f, "ABVActual", "Average Basket Value (Actual vs Target)"),
-                use_container_width=True,
-                config={"displayModeBar": False},
-            )
+            st.plotly_chart(_metric_area(f, "ABVActual", "Average Basket Value (Actual vs Target)"),
+                            use_container_width=True, config={"displayModeBar": False})
 
     with t3:
         if df.empty:
