@@ -86,7 +86,6 @@ def apply_css():
         .sb-section { font-size:.80rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; color:#64748b; margin:12px 4px 6px; }
         .sb-card { background:#ffffff; border:1px solid #eef2f7; border-radius:14px; padding:12px; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
         .sb-hr { height:1px; background:#e5e7eb; margin:12px 0; border-radius:999px; }
-        .sb-pill { border:1px solid #e5e7eb; background:#fff; border-radius:999px; padding:6px 10px; font-size:.85rem; display:block; margin:4px 0; }
         .sb-foot { margin-top:10px; font-size:.75rem; color:#9ca3af; text-align:center; }
         </style>
         """,
@@ -207,7 +206,7 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
     k["avg_abv_target"] = float(df.get("ABVTarget", pd.Series(dtype=float)).mean()) if "ABVTarget" in df else 0.0
     k["avg_abv_actual"] = float(df.get("ABVActual", pd.Series(dtype=float)).mean()) if "ABVActual" in df else 0.0
     k["overall_abv_percent"] = (
-        k["avg_abv_actual"] / k["avg_abv_target"] * 100 if k["avg_abv_target"] > 0 else 0.0
+        k["avg_abv_actual"] / k["avg_abv_target"] * 100 if "ABVTarget" in df and k["avg_abv_target"] > 0 else 0.0
     )
 
     if "BranchName" in df.columns:
@@ -433,7 +432,7 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
         st.plotly_chart(fig_cmp, use_container_width=True, config={"displayModeBar": False})
 
 
-# -------- Branch filter via toggle buttons (kept same) --------
+# -------- Branch filter via toggle buttons (kept same on main page) --------
 def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> List[str]:
     if "BranchName" not in df.columns:
         return []
@@ -474,7 +473,7 @@ def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> L
 def main():
     apply_css()
 
-    # Load data first (so sidebar ranges/branches know bounds)
+    # Load data first
     sheets_map = load_workbook_from_gsheet(config.DEFAULT_PUBLISHED_URL)
     if not sheets_map:
         st.warning("No non-empty sheets found.")
@@ -485,12 +484,10 @@ def main():
         st.error("Could not process data. Check column names and sheet structure.")
         st.stop()
 
-    # Initialize branch selection if not set
+    # Bounds for sidebar presets (based on current branches, initially all)
     all_branches = sorted(df_all["BranchName"].dropna().unique()) if "BranchName" in df_all else []
     if "selected_branches" not in st.session_state:
         st.session_state.selected_branches = list(all_branches)
-
-    # A temp df to compute sidebar bounds based on current branch selection
     df_for_bounds = df_all[df_all["BranchName"].isin(st.session_state.selected_branches)].copy() if all_branches else df_all.copy()
     if "Date" in df_for_bounds.columns and df_for_bounds["Date"].notna().any():
         dmin_sb = df_for_bounds["Date"].min().date()
@@ -498,18 +495,16 @@ def main():
     else:
         dmin_sb = dmax_sb = datetime.today().date()
 
-    # Initialize date session values if missing
     if "start_date" not in st.session_state:
         st.session_state.start_date = dmin_sb
     if "end_date" not in st.session_state:
         st.session_state.end_date = dmax_sb
 
-    # ---------------- Sidebar (preview model) ----------------
+    # -------- Sidebar (without Branches + Settings) --------
     with st.sidebar:
         st.markdown('<div class="sb-title">📊 <span>AL KHAIR DASHBOARD</span></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-subtle">Filters affect all tabs.</div>', unsafe_allow_html=True)
 
-        # Actions
         st.markdown('<div class="sb-section">Actions</div>', unsafe_allow_html=True)
         cols = st.columns(2)
         if cols[0].button("🔄 Refresh Data", use_container_width=True):
@@ -525,15 +520,8 @@ def main():
 
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
 
-        # Quick Range
         st.markdown('<div class="sb-section">Quick Range</div>', unsafe_allow_html=True)
-        preset = st.radio(
-            label="",
-            options=["Last 7d", "Last 30d", "This Month", "YTD", "All Time"],
-            index=1,
-            key="sb_quick_range",
-        )
-        # Apply preset to session dates (clamped to current branch bounds)
+        preset = st.radio("", ["Last 7d", "Last 30d", "This Month", "YTD", "All Time"], index=1, key="sb_quick_range")
         today = dmax_sb
         if preset == "Last 7d":
             st.session_state.start_date, st.session_state.end_date = max(dmin_sb, today - timedelta(days=7)), today
@@ -548,7 +536,6 @@ def main():
         elif preset == "All Time":
             st.session_state.start_date, st.session_state.end_date = dmin_sb, dmax_sb
 
-        # Custom Date (mirrors main pickers)
         st.markdown('<div class="sb-section">Custom Date</div>', unsafe_allow_html=True)
         _sd = st.date_input("Start:", value=st.session_state.start_date, min_value=dmin_sb, max_value=dmax_sb, key="sb_sd")
         _ed = st.date_input("End:",   value=st.session_state.end_date,   min_value=dmin_sb, max_value=dmax_sb, key="sb_ed")
@@ -559,48 +546,23 @@ def main():
 
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
 
-        # Branches (checkboxes bound to same selection)
-        st.markdown('<div class="sb-section">Branches</div>', unsafe_allow_html=True)
-        changed = False
-        for b in all_branches:
-            chk = st.checkbox(b, value=(b in st.session_state.selected_branches), key=f"sb_br_{b}")
-            if chk and b not in st.session_state.selected_branches:
-                st.session_state.selected_branches.append(b); changed = True
-            if (not chk) and b in st.session_state.selected_branches:
-                st.session_state.selected_branches.remove(b); changed = True
-        if changed:
-            # reset dates to branch bounds to avoid out-of-window issues
-            st.session_state.start_date = dmin_sb
-            st.session_state.end_date = dmax_sb
-            st.rerun()
-
-        st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
-
-        # Settings (placeholders – stored in session, not used elsewhere)
-        st.markdown('<div class="sb-section">Settings</div>', unsafe_allow_html=True)
-        st.selectbox("Theme", options=["Light", "Dark"], index=0, key="sb_theme")
-        st.selectbox("Auto-refresh", options=["Off", "5m", "15m", "30m"], index=2, key="sb_autorefresh")
-
-        st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
-
-        # Snapshot (simple, from current selection + dates)
+        # Snapshot
         df_snap = df_for_bounds.copy()
         if "Date" in df_snap.columns and df_snap["Date"].notna().any():
             mask_snap = (df_snap["Date"].dt.date >= st.session_state.start_date) & (df_snap["Date"].dt.date <= st.session_state.end_date)
             df_snap = df_snap.loc[mask_snap]
         snap = calc_kpis(df_snap)
         st.markdown('<div class="sb-section">Today\'s Snapshot</div>', unsafe_allow_html=True)
-        with st.container():
-            st.markdown(
-                f"""
-                <div class="sb-card">
-                  <div>💰 <b>Sales:</b> SAR {snap.get('total_sales_actual',0):,.0f}</div>
-                  <div>📊 <b>Variance:</b> {snap.get('overall_sales_percent',0)-100:+.1f}%</div>
-                  <div>🛍️ <b>Baskets:</b> {snap.get('total_nob_actual',0):,.0f}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+        st.markdown(
+            f"""
+            <div class="sb-card">
+              <div>💰 <b>Sales:</b> SAR {snap.get('total_sales_actual',0):,.0f}</div>
+              <div>📊 <b>Variance:</b> {snap.get('overall_sales_percent',0)-100:+.1f}%</div>
+              <div>🛍️ <b>Baskets:</b> {snap.get('total_nob_actual',0):,.0f}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         st.markdown('<div class="sb-foot">UI preview • v2.0</div>', unsafe_allow_html=True)
 
@@ -614,11 +576,10 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # Apply branch filter to working df (keep your original flow)
+    # Apply branch filter (main page toggles as before)
     df = df_all.copy()
     if "BranchName" in df.columns:
         prev_sel = tuple(st.session_state.get("selected_branches", []))
-        # Keep your original on-page branch toggles (unchanged)
         selected = render_branch_filter_buttons(df)
         if selected:
             df = df[df["BranchName"].isin(selected)].copy()
@@ -629,7 +590,7 @@ def main():
             st.warning("No rows after branch filter.")
             st.stop()
 
-    # --- Date filter (stateful + auto-clamp; unchanged) ---
+    # --- Date filter (unchanged) ---
     if "Date" in df.columns and df["Date"].notna().any():
         dmin = df["Date"].min().date()
         dmax = df["Date"].max().date()
@@ -651,21 +612,9 @@ def main():
 
         c1, c2, _ = st.columns([2, 2, 6])
         with c1:
-            start_d = st.date_input(
-                "Start Date",
-                value=st.session_state.start_date,
-                min_value=dmin,
-                max_value=dmax,
-                key="date_start",
-            )
+            start_d = st.date_input("Start Date", value=st.session_state.start_date, min_value=dmin, max_value=dmax, key="date_start")
         with c2:
-            end_d = st.date_input(
-                "End Date",
-                value=st.session_state.end_date,
-                min_value=dmin,
-                max_value=dmax,
-                key="date_end",
-            )
+            end_d = st.date_input("End Date", value=st.session_state.end_date, min_value=dmin, max_value=dmax, key="date_end")
 
         st.session_state.start_date = max(dmin, min(start_d, dmax))
         st.session_state.end_date = max(dmin, min(end_d, dmax))
@@ -678,7 +627,7 @@ def main():
             st.warning("No rows in selected date range.")
             st.stop()
 
-    # KPIs + Quick insights (unchanged)
+    # KPIs + Quick insights
     k = calc_kpis(df)
     with st.expander("⚡ Quick Insights", expanded=True):
         insights: List[str] = []
@@ -697,7 +646,7 @@ def main():
         else:
             st.write("All metrics look healthy for the current selection.")
 
-    # Tabs (unchanged)
+    # Tabs
     t1, t2, t3 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "📥 Export"])
     with t1:
         render_overview(df, k)
