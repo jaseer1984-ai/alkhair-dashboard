@@ -465,7 +465,6 @@ def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> L
             st.session_state.selected_branches = []
             st.rerun()
 
-    # show buttons in a row
     with col_b:
         btn_cols = st.columns(len(all_branches)) if all_branches else []
         for i, b in enumerate(all_branches):
@@ -487,7 +486,7 @@ def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> L
 def main():
     apply_css()
 
-    # Sidebar (no data-source expander)
+    # Sidebar
     with st.sidebar:
         st.markdown(f"### 📊 {config.PAGE_TITLE}")
         st.caption("Filters affect all tabs.")
@@ -495,42 +494,76 @@ def main():
             load_workbook_from_gsheet.clear()
             st.rerun()
 
-    # Always use the default published URL
+    # Load data
     sheets_map = load_workbook_from_gsheet(config.DEFAULT_PUBLISHED_URL)
     if not sheets_map:
         st.warning("No non-empty sheets found.")
         st.stop()
 
-    df = process_branch_data(sheets_map)
-    if df.empty:
+    df_all = process_branch_data(sheets_map)
+    if df_all.empty:
         st.error("Could not process data. Check column names and sheet structure.")
         st.stop()
 
     st.markdown(f"<div class='title'>📊 {config.PAGE_TITLE}</div>", unsafe_allow_html=True)
     date_span = ""
-    if "Date" in df.columns and df["Date"].notna().any():
-        date_span = f"{df['Date'].min().date()} → {df['Date'].max().date()}"
+    if "Date" in df_all.columns and df_all["Date"].notna().any():
+        date_span = f"{df_all['Date'].min().date()} → {df_all['Date'].max().date()}"
     st.markdown(
-        f"<div class='subtitle'>Branches: {df['BranchName'].nunique() if 'BranchName' in df else 0} • Rows: {len(df):,} {('• ' + date_span) if date_span else ''}</div>",
+        f"<div class='subtitle'>Branches: {df_all['BranchName'].nunique() if 'BranchName' in df_all else 0} • Rows: {len(df_all):,} {('• ' + date_span) if date_span else ''}</div>",
         unsafe_allow_html=True,
     )
 
     # Branch filter (toggle buttons)
+    df = df_all.copy()
     if "BranchName" in df.columns:
+        prev_sel = tuple(st.session_state.get("selected_branches", []))
         selected = render_branch_filter_buttons(df)
         if selected:
             df = df[df["BranchName"].isin(selected)].copy()
+        # If branch selection changed, reset stored dates so pickers re-initialize correctly
+        if tuple(selected) != prev_sel:
+            st.session_state.pop("start_date", None)
+            st.session_state.pop("end_date", None)
         if df.empty:
             st.warning("No rows after branch filter.")
             st.stop()
 
-    # Date filter
+    # --- Date filter (robust, stateful) ---
     if "Date" in df.columns and df["Date"].notna().any():
+        # compute min/max AFTER branch filtering
+        dmin = df["Date"].min().date()
+        dmax = df["Date"].max().date()
+
+        # init once
+        if "start_date" not in st.session_state:
+            st.session_state.start_date = dmin
+        if "end_date" not in st.session_state:
+            st.session_state.end_date = dmax
+
         c1, c2, _ = st.columns([2, 2, 6])
         with c1:
-            start_d = st.date_input("Start Date", value=df["Date"].min().date())
+            start_d = st.date_input(
+                "Start Date",
+                value=st.session_state.start_date,
+                min_value=dmin,
+                max_value=dmax,
+                key="date_start",
+            )
         with c2:
-            end_d = st.date_input("End Date", value=df["Date"].max().date())
+            end_d = st.date_input(
+                "End Date",
+                value=st.session_state.end_date,
+                min_value=dmin,
+                max_value=dmax,
+                key="date_end",
+            )
+
+        # persist changes
+        st.session_state.start_date = start_d
+        st.session_state.end_date = end_d
+
+        # always apply mask (inclusive)
         mask = (df["Date"].dt.date >= start_d) & (df["Date"].dt.date <= end_d)
         df = df.loc[mask].copy()
         if df.empty:
