@@ -34,7 +34,7 @@ st.set_page_config(page_title=config.PAGE_TITLE, layout=config.LAYOUT, initial_s
 
 
 # =========================================
-# CSS (UI + modern sidebar like the preview)
+# CSS (desktop + mobile responsive)
 # =========================================
 def apply_css():
     st.markdown(
@@ -50,7 +50,6 @@ def apply_css():
         [data-testid="metric-container"] {
             background:#fff !important; border-radius:16px !important; border:1px solid rgba(0,0,0,.06)!important; padding:18px!important;
         }
-        /* Soft cards */
         .card { background:#fcfcfc; border:1px solid #f1f5f9; border-radius:16px; padding:16px; height:100%; }
 
         .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-weight:700; font-size:.80rem; }
@@ -59,7 +58,7 @@ def apply_css():
         .pill.warn      { background:#fffbeb; color:#d97706; }
         .pill.danger    { background:#fef2f2; color:#dc2626; }
 
-        /* Colored Tabs */
+        /* Tabs */
         .stTabs [data-baseweb="tab-list"] { gap: 8px; border-bottom: none; }
         .stTabs [data-baseweb="tab"] {
           border-radius: 10px 10px 0 0 !important;
@@ -73,20 +72,31 @@ def apply_css():
         .stTabs [data-baseweb="tab"]:nth-child(2)[aria-selected="true"] { background: linear-gradient(135deg,#3b82f6 0%,#60a5fa 100%) !important; border-color:#60a5fa !important; }
         .stTabs [data-baseweb="tab"]:nth-child(3)[aria-selected="true"] { background: linear-gradient(135deg,#8b5cf6 0%,#a78bfa 100%) !important; border-color:#a78bfa !important; }
 
-        /* ================= Sidebar (preview model) ================= */
+        /* Sidebar (desktop look) */
         [data-testid="stSidebar"] {
-          background: #f7f9fc;
-          border-right: 1px solid #e5e7eb;
-          min-width: 280px; max-width: 320px;
+          background: #f7f9fc; border-right: 1px solid #e5e7eb; min-width: 280px; max-width: 320px;
         }
         [data-testid="stSidebar"] .block-container { padding: 18px 16px 20px; }
-
         .sb-title { display:flex; gap:10px; align-items:center; font-weight:900; font-size:1.05rem; }
         .sb-subtle { color:#6b7280; font-size:.85rem; margin:6px 0 12px; }
         .sb-section { font-size:.80rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; color:#64748b; margin:12px 4px 6px; }
         .sb-card { background:#ffffff; border:1px solid #eef2f7; border-radius:14px; padding:12px; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
         .sb-hr { height:1px; background:#e5e7eb; margin:12px 0; border-radius:999px; }
         .sb-foot { margin-top:10px; font-size:.75rem; color:#9ca3af; text-align:center; }
+
+        /* ---------- Mobile tweaks ---------- */
+        @media (max-width: 680px) {
+          .main .block-container { padding: 0.6rem 0.8rem; }
+          .title { font-size: 1.3rem; }
+          .subtitle { font-size: .85rem; }
+          [data-testid="metric-container"] { padding:12px!important; }
+          /* Hide the sidebar on phones (still available via hamburger menu) */
+          [data-testid="stSidebar"] { display: none; }
+          /* show mobile widgets */
+          .mobile-only { display: block !important; }
+          .desktop-only { display: none !important; }
+        }
+        .mobile-only { display: none; }  /* hidden by default on desktop */
         </style>
         """,
         unsafe_allow_html=True,
@@ -488,6 +498,7 @@ def main():
     all_branches = sorted(df_all["BranchName"].dropna().unique()) if "BranchName" in df_all else []
     if "selected_branches" not in st.session_state:
         st.session_state.selected_branches = list(all_branches)
+
     df_for_bounds = df_all[df_all["BranchName"].isin(st.session_state.selected_branches)].copy() if all_branches else df_all.copy()
     if "Date" in df_for_bounds.columns and df_for_bounds["Date"].notna().any():
         dmin_sb = df_for_bounds["Date"].min().date()
@@ -500,7 +511,7 @@ def main():
     if "end_date" not in st.session_state:
         st.session_state.end_date = dmax_sb
 
-    # -------- Sidebar (without Branches + Settings) --------
+    # -------- Sidebar (Actions, Quick Range, Custom Date, Snapshot) --------
     with st.sidebar:
         st.markdown('<div class="sb-title">📊 <span>AL KHAIR DASHBOARD</span></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-subtle">Filters affect all tabs.</div>', unsafe_allow_html=True)
@@ -575,6 +586,40 @@ def main():
         f"<div class='subtitle'>Branches: {df_all['BranchName'].nunique() if 'BranchName' in df_all else 0} • Rows: {len(df_all):,} {('• ' + date_span) if date_span else ''}</div>",
         unsafe_allow_html=True,
     )
+
+    # ===== 📱 Mobile filter drawer (visible only on phones via CSS) =====
+    st.markdown('<div class="mobile-only">', unsafe_allow_html=True)
+    with st.expander("📱 Filters", expanded=False):
+        preset_m = st.radio(
+            "Quick range",
+            ["Last 7d", "Last 30d", "This Month", "YTD", "All Time"],
+            index=1,
+            horizontal=True,
+            key="m_quick_range",
+        )
+        dmin_all = df_all["Date"].min().date() if "Date" in df_all else datetime.today().date()
+        dmax_all = df_all["Date"].max().date() if "Date" in df_all else datetime.today().date()
+        today_all = dmax_all
+        if preset_m == "Last 7d":
+            st.session_state.start_date, st.session_state.end_date = max(dmin_all, today_all - timedelta(days=7)), today_all
+        elif preset_m == "Last 30d":
+            st.session_state.start_date, st.session_state.end_date = max(dmin_all, today_all - timedelta(days=30)), today_all
+        elif preset_m == "This Month":
+            first = today_all.replace(day=1)
+            st.session_state.start_date, st.session_state.end_date = max(dmin_all, first), today_all
+        elif preset_m == "YTD":
+            first = today_all.replace(month=1, day=1)
+            st.session_state.start_date, st.session_state.end_date = max(dmin_all, first), today_all
+        elif preset_m == "All Time":
+            st.session_state.start_date, st.session_state.end_date = dmin_all, dmax_all
+
+        _ms = st.date_input("Start date", value=st.session_state.start_date, min_value=dmin_all, max_value=dmax_all, key="m_start")
+        _me = st.date_input("End date",   value=st.session_state.end_date,   min_value=dmin_all, max_value=dmax_all, key="m_end")
+        st.session_state.start_date = max(dmin_all, min(_ms, dmax_all))
+        st.session_state.end_date   = max(dmin_all, min(_me, dmax_all))
+        if st.session_state.start_date > st.session_state.end_date:
+            st.session_state.start_date, st.session_state.end_date = dmin_all, dmax_all
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # Apply branch filter (main page toggles as before)
     df = df_all.copy()
