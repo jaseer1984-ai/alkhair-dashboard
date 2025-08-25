@@ -529,46 +529,62 @@ def main():
             st.warning("No rows after branch filter.")
             st.stop()
 
-    # --- Date filter (robust, stateful) ---
-    if "Date" in df.columns and df["Date"].notna().any():
-        # compute min/max AFTER branch filtering
-        dmin = df["Date"].min().date()
-        dmax = df["Date"].max().date()
+  # --- Date filter (stateful + auto-clamp) ---
+if "Date" in df.columns and df["Date"].notna().any():
+    dmin = df["Date"].min().date()
+    dmax = df["Date"].max().date()
 
-        # init once
-        if "start_date" not in st.session_state:
-            st.session_state.start_date = dmin
-        if "end_date" not in st.session_state:
-            st.session_state.end_date = dmax
+    # init once from current data window
+    if "start_date" not in st.session_state:
+        st.session_state.start_date = dmin
+    if "end_date" not in st.session_state:
+        st.session_state.end_date = dmax
 
-        c1, c2, _ = st.columns([2, 2, 6])
-        with c1:
-            start_d = st.date_input(
-                "Start Date",
-                value=st.session_state.start_date,
-                min_value=dmin,
-                max_value=dmax,
-                key="date_start",
-            )
-        with c2:
-            end_d = st.date_input(
-                "End Date",
-                value=st.session_state.end_date,
-                min_value=dmin,
-                max_value=dmax,
-                key="date_end",
-            )
+    # --- clamp stored dates to new window (handles branch changes / new data) ---
+    s = st.session_state.start_date
+    e = st.session_state.end_date
+    if s < dmin or s > dmax:
+        s = dmin
+    if e > dmax or e < dmin:
+        e = dmax
+    if s > e:
+        s, e = dmin, dmax
+    st.session_state.start_date, st.session_state.end_date = s, e
 
-        # persist changes
-        st.session_state.start_date = start_d
-        st.session_state.end_date = end_d
+    c1, c2, _ = st.columns([2, 2, 6])
+    with c1:
+        start_d = st.date_input(
+            "Start Date",
+            value=st.session_state.start_date,
+            min_value=dmin,
+            max_value=dmax,
+            key="date_start",
+        )
+    with c2:
+        end_d = st.date_input(
+            "End Date",
+            value=st.session_state.end_date,
+            min_value=dmin,
+            max_value=dmax,
+            key="date_end",
+        )
 
-        # always apply mask (inclusive)
-        mask = (df["Date"].dt.date >= start_d) & (df["Date"].dt.date <= end_d)
-        df = df.loc[mask].copy()
-        if df.empty:
-            st.warning("No rows in selected date range.")
-            st.stop()
+    # persist + re-clamp in case user picks outside order
+    st.session_state.start_date = max(dmin, min(start_d, dmax))
+    st.session_state.end_date   = max(dmin, min(end_d,   dmax))
+    if st.session_state.start_date > st.session_state.end_date:
+        st.session_state.start_date, st.session_state.end_date = dmin, dmax
+
+    # apply mask (inclusive)
+    mask = (
+        (df["Date"].dt.date >= st.session_state.start_date) &
+        (df["Date"].dt.date <= st.session_state.end_date)
+    )
+    df = df.loc[mask].copy()
+    if df.empty:
+        st.warning("No rows in selected date range.")
+        st.stop()
+
 
     # KPIs + Quick insights
     k = calc_kpis(df)
@@ -649,3 +665,4 @@ if __name__ == "__main__":
         main()
     except Exception:
         st.error("❌ Application Error. Please adjust filters or refresh.")
+
