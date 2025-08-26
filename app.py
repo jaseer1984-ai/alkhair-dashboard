@@ -1,3 +1,5 @@
+# app.py — Al Khair Business Performance (full app with robust Liquidity parser)
+
 from __future__ import annotations
 
 import io
@@ -268,7 +270,7 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
 
 
 # =========================================
-# LIQUIDITY — tolerant parser (handles merged title row)
+# LIQUIDITY — tolerant parser (handles merged first row + duplicate headers)
 # =========================================
 def find_candidate_liquidity_sheets(excel_data: Dict[str, pd.DataFrame]) -> List[str]:
     """Return sheet names most likely to be Liquidity."""
@@ -279,82 +281,74 @@ def find_candidate_liquidity_sheets(excel_data: Dict[str, pd.DataFrame]) -> List
         name_hit = bool(re.search(r"liquid|liq|cash|bank", k, re.I))
         cols = [str(c) for c in df.columns]
         has_date = any(re.search(r"\bdate\b", str(c), re.I) for c in cols)
-        has_total_liq = any(re.search(r"total\s*liquid", str(c), re.I) for c in cols)
+        has_total_liq = any(re.search(r"liquid", str(c), re.I) for c in cols)
         if name_hit or (has_date and has_total_liq):
             cands.append(k)
     cands.sort(key=lambda x: (0 if re.search(r"liquid", x, re.I) else 1, x.lower()))
     return cands
 
+
 def parse_liquidity_from_sheet(df_sheet: pd.DataFrame) -> pd.DataFrame:
-    """Parse ONE sheet into tidy liquidity rows with flexible headers and auto header-row detection."""
+    """Parse ONE sheet into tidy liquidity rows with flexible headers, auto header detection,
+    and positional selection to handle duplicate column labels."""
     if df_sheet is None or df_sheet.empty:
         return pd.DataFrame()
 
     raw = df_sheet.copy()
 
-    # --- AUTO HEADER FIX: if 'date' is not in column names, try to promote a lower row to header
+    # --- Promote the true header row if the first row is a merged title (no 'date' in columns)
     cols_str = [str(c) for c in raw.columns]
-    has_date_in_cols = any(re.search(r"\bdate\b", c, re.I) for c in cols_str)
-
-    if not has_date_in_cols:
+    if not any(re.search(r"\bdate\b", c, re.I) for c in cols_str):
         header_row_idx = None
-        max_check = min(10, len(raw))
-        for i in range(max_check):
+        for i in range(min(10, len(raw))):
             row_vals = " | ".join([str(x) for x in raw.iloc[i].tolist()])
             if re.search(r"\bdate\b", row_vals, re.I):
                 header_row_idx = i
                 break
         if header_row_idx is not None:
             new_header = raw.iloc[header_row_idx].astype(str).str.strip().tolist()
-            raw = raw.iloc[header_row_idx+1:].copy()
+            raw = raw.iloc[header_row_idx + 1:].copy()
             raw.columns = new_header
 
     # Clean empties and strip
     raw = raw.dropna(how="all").dropna(axis=1, how="all")
     raw.columns = raw.columns.astype(str).str.strip()
 
-    # DATE column
-    date_cols = [c for c in raw.columns if re.search(r"\bdate\b", c, re.I)]
-    if not date_cols:
+    # DATE column index
+    date_candidates = [i for i, c in enumerate(raw.columns) if re.search(r"\bdate\b", str(c), re.I)]
+    if not date_candidates:
         return pd.DataFrame()
-    date_col = date_cols[0]
-
+    date_idx = date_candidates[0]
     cols = list(raw.columns)
 
-    # Find any column that looks like "Total Liquidity"
-    total_idxs = [i for i, c in enumerate(cols) if re.search(r"total\s*liquid", c, re.I)]
+    # Indices of each branch block "Total Liquidity"
+    total_idxs = [i for i, c in enumerate(cols) if re.search(r"total\s*liquid", str(c), re.I)]
     if not total_idxs:
-        total_idxs = [i for i, c in enumerate(cols) if re.search(r"liquid", c, re.I)]
+        total_idxs = [i for i, c in enumerate(cols) if re.search(r"liquid", str(c), re.I)]
+    if not total_idxs:
+        return pd.DataFrame()
 
     parts: List[pd.DataFrame] = []
 
-    def _branch_from_total(h: str) -> str:
-        # e.g., "Al khair - 102 Total Liquidity" -> "Al khair - 102"
-        s = re.sub(r"(?i)total\s*liquidity", "", str(h)).strip(" -|:")
+    def _branch_from_total(header_text: str) -> str:
+        s = re.sub(r"(?i)total\s*liquidity", "", str(header_text)).strip(" -|:")
         return s if s else "Branch"
 
     for idx in total_idxs:
-        total_col = cols[idx]
-        change_col = cols[idx + 1] if idx + 1 < len(cols) else None
-        pct_col    = cols[idx + 2] if idx + 2 < len(cols) else None
+        series_map = {
+            "Date": raw.iloc[:, date_idx],
+            "TotalLiquidity": raw.iloc[:, idx],
+        }
+        # right neighbors (optional)
+        if idx + 1 < len(cols) and re.search(r"change", str(cols[idx + 1]), re.I):
+            series_map["ChangeLiquidity"] = raw.iloc[:, idx + 1]
+        if idx + 2 < len(cols) and (
+            re.search(r"%", str(cols[idx + 2])) or re.search(r"percent|of\s*change", str(cols[idx + 2]), re.I)
+        ):
+            series_map["PctChange"] = raw.iloc[:, idx + 2]
 
-        ok_change = bool(change_col) and re.search(r"change", str(change_col), re.I)   # accepts "Change in Liquid"
-        ok_pct    = bool(pct_col) and (re.search(r"%", str(pct_col)) or re.search(r"percent|of\s*change", str(pct_col), re.I))
-
-        take = [date_col, total_col]
-        rename_map = {date_col: "Date", total_col: "TotalLiquidity"}
-        if ok_change:
-            take.append(change_col)  # type: ignore
-            rename_map[change_col] = "ChangeLiquidity"  # type: ignore
-        if ok_pct:
-            take.append(pct_col)  # type: ignore
-            rename_map[pct_col] = "PctChange"  # type: ignore
-
-        take = list(dict.fromkeys(take))  # guard duplicates
-
-        sub = raw[take].copy()
-        sub.rename(columns=rename_map, inplace=True)
-        sub["Branch"] = _branch_from_total(total_col)
+        sub = pd.DataFrame(series_map)
+        sub["Branch"] = _branch_from_total(cols[idx])  # use label to infer branch name
         parts.append(sub)
 
     if not parts:
@@ -362,13 +356,17 @@ def parse_liquidity_from_sheet(df_sheet: pd.DataFrame) -> pd.DataFrame:
 
     df = pd.concat(parts, ignore_index=True)
 
-    # Types
+    # ---- Type coercion
+    def _to_num(s: pd.Series) -> pd.Series:
+        s = s.astype(str).str.replace(",", "", regex=False).str.replace("%", "", regex=False).str.strip()
+        return pd.to_numeric(s, errors="coerce")
+
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    df["TotalLiquidity"] = pd.to_numeric(df["TotalLiquidity"].astype(str).str.replace(",", "", regex=False), errors="coerce")
+    df["TotalLiquidity"] = _to_num(df["TotalLiquidity"])
     if "ChangeLiquidity" in df.columns:
-        df["ChangeLiquidity"] = pd.to_numeric(df["ChangeLiquidity"].astype(str).str.replace(",", "", regex=False), errors="coerce")
+        df["ChangeLiquidity"] = _to_num(df["ChangeLiquidity"])
     if "PctChange" in df.columns:
-        df["PctChange"] = pd.to_numeric(df["PctChange"].astype(str).str.replace("%", "", regex=False), errors="coerce")
+        df["PctChange"] = _to_num(df["PctChange"])
 
     df = df.dropna(subset=["Date"]).sort_values(["Date", "Branch"]).reset_index(drop=True)
     return df
@@ -598,12 +596,12 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
     st.markdown("### 🏆 Overall Performance")
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("💰 Total Sales", f"SAR {k.get('total_sales_actual',0):,.0f}", delta=f"vs Target: {k.get('overall_sales_percent',0):.1f}%")
-    variance_color = "normal" if k.get('total_sales_variance', 0) >= 0 else "inverse"
+    variance_color = "normal" if k.get("total_sales_variance", 0) >= 0 else "inverse"
     c2.metric("📊 Sales Variance", f"SAR {k.get('total_sales_variance',0):,.0f}", delta=f"{k.get('overall_sales_percent',0)-100:+.1f}%", delta_color=variance_color)
-    nob_color = "normal" if k.get('overall_nob_percent', 0) >= config.TARGETS['nob_achievement'] else "inverse"
+    nob_color = "normal" if k.get("overall_nob_percent", 0) >= config.TARGETS['nob_achievement'] else "inverse"
     c3.metric("🛍️ Total Baskets", f"{k.get('total_nob_actual',0):,.0f}", delta=f"Achievement: {k.get('overall_nob_percent',0):.1f}%", delta_color=nob_color)
     c4.metric("💎 Avg Basket Value", f"SAR {k.get('avg_abv_actual',0):,.2f}", delta=f"vs Target: {k.get('overall_abv_percent',0):.1f}%")
-    score_color = "normal" if k.get('performance_score', 0) >= 80 else "off"
+    score_color = "normal" if k.get("performance_score", 0) >= 80 else "off"
     c5.metric("⭐ Performance Score", f"{k.get('performance_score',0):.0f}/100", delta="Weighted Score", delta_color=score_color)
 
     if "branch_performance" in k and not k["branch_performance"].empty:
@@ -631,7 +629,7 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
 
 
 # -------------------------------
-# Branch filter UI (chips/multiselect)
+# Branch filter UI (multiselect)
 # -------------------------------
 def render_branch_filter_buttons(df: pd.DataFrame) -> List[str]:
     branches = sorted(df["BranchName"].dropna().unique()) if "BranchName" in df else []
@@ -667,6 +665,9 @@ def main():
     if df_all.empty:
         st.error("Could not process branch data. Check branch sheet names and columns.")
         st.stop()
+
+    # Liquidity candidates (we'll pick in the tab)
+    liq_candidates = find_candidate_liquidity_sheets(sheets_map)
 
     # Sidebar bounds
     all_branches = sorted(df_all["BranchName"].dropna().unique()) if "BranchName" in df_all else []
@@ -941,14 +942,13 @@ def main():
     with t4:
         st.markdown("### 💧 Liquidity Report")
 
-        # Let user choose which sheet to parse (robust for merged title in row 1)
-        candidates = find_candidate_liquidity_sheets(sheets_map)
-        if not candidates:
+        # Choose which sheet to parse (handles merged title in row 1)
+        if not liq_candidates:
             st.info("No likely Liquidity sheets detected. Tip: include a 'Date' column and headers like '… Total Liquidity', 'Change …', '% of Change'.")
             st.write("Available tabs:", list(sheets_map.keys()))
             st.stop()
 
-        picked = st.selectbox("Select Liquidity sheet", options=candidates, index=0, key="liq_sheet_pick")
+        picked = st.selectbox("Select Liquidity sheet", options=liq_candidates, index=0, key="liq_sheet_pick")
         liq_df = parse_liquidity_from_sheet(sheets_map[picked])
 
         if liq_df.empty:
