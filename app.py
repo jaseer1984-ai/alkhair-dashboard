@@ -62,7 +62,7 @@ def apply_css():
           padding:16px!important;text-align:center!important;
         }
         [data-testid="stMetricValue"]{
-          font-size:clamp(16px,2.2vw,22px)!important; /* smaller */
+          font-size:clamp(16px,2.2vw,22px)!important;
           line-height:1.2!important;
         }
         [data-testid="stMetricLabel"]{ font-size:.85rem!important;color:#6b7280!important; }
@@ -82,7 +82,6 @@ def apply_css():
         }
         .stTabs [data-baseweb="tab"]:hover { background:#e5e7eb!important; }
         .stTabs [aria-selected="true"] { color:#fff!important; box-shadow:0 4px 12px rgba(0,0,0,.15); }
-        .stTabs [data-baseweb="tab"]:nth-child(2)[aria-selected="true"] { background:linear-gradient(135deg,#3b82f6,#60a5fa)!important; border-color:#60a5fa!important; }
 
         /* Sidebar basics */
         [data-testid="stSidebar"]{ background:#f7f9fc; border-right:1px solid #e5e7eb; min-width:280px; max-width:320px; }
@@ -96,8 +95,6 @@ def apply_css():
         .stDataFrame table thead tr th { text-align: center !important; }
 
         /* Responsive */
-        [data-testid="stHorizontalBlock"] { display:flex; flex-wrap:wrap; gap:1rem; }
-        [data-testid="stHorizontalBlock"] > div { min-width:260px; flex:1 1 260px; }
         [data-testid="stPlotlyChart"], [data-testid="stDataFrame"] { overflow:auto; }
         .js-plotly-plot, .plotly, .js-plotly-plot .plotly, .js-plotly-plot .main-svg { max-width:100%!important; }
 
@@ -314,7 +311,7 @@ def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
     return fig
 
 
-# ========= Liquidity Trend line (used in Liquidity tab) =========
+# ========= Liquidity Trend (used in Liquidity tab) =========
 def _liquidity_total_trend_fig(daily: pd.DataFrame, title: str = "Total Liquidity Trend") -> go.Figure:
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -348,15 +345,35 @@ def _branch_color_by_name(name: str) -> str:
     return "#6b7280"
 
 
+def _balanced_rows(n: int) -> List[int]:
+    """Return a list of column counts per row to avoid lonely last cards."""
+    rows: List[int] = []
+    remaining = n
+    while remaining > 0:
+        if remaining % 3 == 1 and remaining != 1:
+            take = 2
+        else:
+            take = min(3, remaining)
+        rows.append(take)
+        remaining -= take
+    return rows
+
+
 def render_branch_cards(bp: pd.DataFrame):
+    """Old-model look but with balanced rows to keep alignment nice."""
     st.markdown("### 🏪 Branch Overview")
     if bp.empty:
-        st.info("No branch summary available."); return
-    cols_per_row = 3
+        st.info("No branch summary available.")
+        return
+
     items = list(bp.index)
-    for i in range(0, len(items), cols_per_row):
-        row = st.columns(cols_per_row, gap="medium")
-        for j, br in enumerate(items[i: i + cols_per_row]):
+    layout = _balanced_rows(len(items))  # e.g., 4 -> [2,2], 5 -> [3,2], 7 -> [2,3,2]
+    idx = 0
+
+    for cols_in_row in layout:
+        row = st.columns(cols_in_row, gap="medium")
+        for j in range(cols_in_row):
+            br = items[idx]; idx += 1
             with row[j]:
                 r = bp.loc[br]
                 avg_pct = float(np.nanmean([r.get("SalesPercent", 0), r.get("NOBPercent", 0), r.get("ABVPercent", 0)]) or 0)
@@ -411,7 +428,7 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
             })
             .round(1)
         )
-        # Center headers only (cells left as-is)
+        # Center headers only
         styler = (
             df_table.style
             .format({"Sales %": "{:,.1f}", "NOB %": "{:,.1f}", "ABV %": "{:,.1f}", "Sales (Actual)": "{:,.0f}", "Sales (Target)": "{:,.0f}"})
@@ -471,7 +488,7 @@ def main():
 
         st.markdown('<div class="sb-section">Custom Date</div>', unsafe_allow_html=True)
         _sd = st.date_input("Start:", value=st.session_state.start_date, min_value=dmin_sb, max_value=dmax_sb, key="sb_sd")
-        _ed = st.date_input("End:", value=st.session_state.end_date, min_value=dmin_sb, max_value=dmax_sb, key="sb_ed")
+        _ed = st.date_input("End:", value=st.session_state.end_date,   min_value=dmin_sb, max_value=dmax_sb, key="sb_ed")
         st.session_state.start_date = max(dmin_sb, min(_sd, dmax_sb))
         st.session_state.end_date   = max(dmin_sb, min(_ed, dmax_sb))
         if st.session_state.start_date > st.session_state.end_date:
@@ -501,7 +518,7 @@ def main():
         if df.empty: st.warning("No rows in selected date range."); st.stop()
 
     # ======================
-    # Quick Insights (now includes Liquidity insights)
+    # Quick Insights (with Liquidity)
     # ======================
     k = calc_kpis(df)
     exp_qi = st.expander("⚡ Quick Insights", expanded=True)
@@ -522,7 +539,7 @@ def main():
         if k.get("total_sales_variance", 0) < 0:
             insights.append(f"🟥 Overall variance negative by SAR {abs(k['total_sales_variance']):,.0f}")
 
-        # --- Liquidity insights (last 30 calendar days in the filtered range) ---
+        # Liquidity insights (last 30 days in filtered range)
         if {"TotalLiquidity", "Date"}.issubset(df.columns):
             dliq = df.dropna(subset=["Date", "TotalLiquidity"]).copy()
             if not dliq.empty:
@@ -549,7 +566,6 @@ def main():
                         if down_val < 0:
                             insights.append(f"🏦 Biggest ↓ branch (30d): {down_br} — SAR {down_val:,.0f}")
 
-        # Render
         if insights: st.markdown("\n".join(f"- {line}" for line in insights))
         else:       st.caption("All metrics look healthy for the current selection.")
 
@@ -576,7 +592,6 @@ def main():
         with m3: st.plotly_chart(_metric_area(f, "ABVActual", "Average Basket Value (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
 
     with t3:
-        # simple Liquidity tab: 30d line + stats
         if {"TotalLiquidity","Date"}.issubset(df.columns):
             dd = df.dropna(subset=["Date", "TotalLiquidity"]).groupby("Date", as_index=False)["TotalLiquidity"].sum().sort_values("Date")
             last30 = dd.tail(30)
