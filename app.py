@@ -1,9 +1,10 @@
-# app.py — Al Khair Business Performance (full app with robust Liquidity parser)
+# app.py — Al Khair Business Performance (full app with robust Liquidity parser + safe percent formatter)
 
 from __future__ import annotations
 
 import io
 import re
+import math
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -188,6 +189,16 @@ def _parse_numeric(s: pd.Series) -> pd.Series:
         s.astype(str).str.replace(",", "", regex=False).str.replace("%", "", regex=False).str.strip(),
         errors="coerce",
     )
+
+def fmt_percent(x) -> str:
+    """Return '—' for None/NaN/inf, else 'N.n%'."""
+    try:
+        v = float(x)
+        if not math.isfinite(v):
+            return "—"
+        return f"{v:.1f}%"
+    except (TypeError, ValueError):
+        return "—"
 
 
 # =========================================
@@ -489,7 +500,7 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool 
             )
         )
         if daily_target is not None:
-            d_target = daily_target[daily_target["BranchName"] == br]
+            d_target = daily_target[daily_actual["BranchName"] == br]
             fig.add_trace(
                 go.Scatter(
                     x=d_target["Date"],
@@ -969,7 +980,7 @@ def main():
         c1.metric("💼 Latest Total (sum)", f"SAR {lk.get('latest_total_sum',0):,.0f}", f"as of {lk.get('latest_date')}")
         c2.metric("🔄 Latest Change (sum)", f"SAR {lk.get('latest_change_sum',0):,.0f}")
         pct = lk.get("latest_pct_avg")
-        c3.metric("% Change (avg)", f"{pct:.1f}%" if pct==pct else "—")
+        c3.metric("% Change (avg)", fmt_percent(pct))
 
         # Charts
         st.markdown("#### Charts")
