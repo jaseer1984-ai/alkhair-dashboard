@@ -17,9 +17,9 @@ import plotly.graph_objects as go
 class Config:
     PAGE_TITLE = "Al Khair Business Performance"
     LAYOUT = "wide"
-    # ⚠️ Put your sheet URL here (direct /d/{id}/… recommended)
+    # ⬇️ Put YOUR Google Sheet URL here (edit or published). Must be publicly viewable.
     DEFAULT_PUBLISHED_URL = (
-        "https://docs.google.com/spreadsheets/d/1sYd2tCx_u3vh41ecdQNPVAOOn7qbu_Ns/edit?gid=1185316772#gid=1185316772"
+        "https://docs.google.com/spreadsheets/d/1sYd2tCx_u3vh41ecdQNPVAOOn7qbu_Ns/edit?gid=0#gid=0"
     )
     BRANCHES = {
         "Al khair - 102": {"name": "Al Khair", "code": "102", "color": "#3b82f6"},
@@ -35,7 +35,7 @@ st.set_page_config(page_title=config.PAGE_TITLE, layout=config.LAYOUT, initial_s
 
 
 # =========================================
-# CSS (desktop + mobile responsive)
+# CSS
 # =========================================
 def apply_css():
     st.markdown(
@@ -72,9 +72,7 @@ def apply_css():
         .stTabs [data-baseweb="tab"]:nth-child(3)[aria-selected="true"] { background: linear-gradient(135deg,#8b5cf6 0%,#a78bfa 100%) !important; }
         .stTabs [data-baseweb="tab"]:nth-child(4)[aria-selected="true"] { background: linear-gradient(135deg,#10b981 0%,#34d399 100%) !important; }
 
-        [data-testid="stSidebar"] {
-          background: #f7f9fc; border-right: 1px solid #e5e7eb; min-width: 280px; max-width: 320px;
-        }
+        [data-testid="stSidebar"] { background: #f7f9fc; border-right: 1px solid #e5e7eb; min-width: 280px; max-width: 320px; }
         [data-testid="stSidebar"] .block-container { padding: 18px 16px 20px; }
         .sb-title { display:flex; gap:10px; align-items:center; font-weight:900; font-size:1.05rem; }
         .sb-subtle { color:#6b7280; font-size:.85rem; margin:6px 0 12px; }
@@ -99,7 +97,7 @@ def apply_css():
 
 
 # =========================================
-# LOADERS (no html5lib required)
+# LOADERS (no html5lib needed)
 # =========================================
 def _extract_spreadsheet_id(url: str) -> Optional[str]:
     m = re.search(r"/spreadsheets/d/([^/]+)/", url)
@@ -110,44 +108,29 @@ def _xlsx_export_url(spreadsheet_id: str) -> str:
     return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=xlsx"
 
 
+def _csv_export_url(spreadsheet_id: str, gid: int) -> str:
+    return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv&gid={gid}"
+
+
 def _sheet_list_from_html(url: str) -> List[Tuple[str, int]]:
-    """
-    Read the sheet edit page HTML and extract (title, gid) via regex.
-    Works without BeautifulSoup/html5lib.
-    """
+    """Discover (title, gid) without BeautifulSoup/html5lib."""
     headers = {"User-Agent": "Mozilla/5.0 (Streamlit Loader)"}
     r = requests.get(url, timeout=60, headers=headers)
     r.raise_for_status()
     html = r.text
-
-    # Matches: "sheetId":123456789,"title":"Sheet Name"
     pairs: List[Tuple[str, int]] = []
     pattern = re.compile(r'"sheetId"\s*:\s*(\d+)\s*,\s*"title"\s*:\s*"([^"]+)"')
     for m in pattern.finditer(html):
         gid = int(m.group(1))
         title = m.group(2)
-        pairs.append((title, gid))
-
-    # Deduplicate while preserving order
-    seen = set()
-    unique_pairs = []
-    for title, gid in pairs:
-        if gid not in seen:
-            seen.add(gid)
-            unique_pairs.append((title, gid))
-    return unique_pairs
-
-
-def _csv_export_url(spreadsheet_id: str, gid: int) -> str:
-    return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv&gid={gid}"
+        if (title, gid) not in pairs:
+            pairs.append((title, gid))
+    return pairs
 
 
 @st.cache_data(show_spinner=False)
 def load_workbook_from_gsheet(sheet_url: str) -> Dict[str, pd.DataFrame]:
-    """
-    1) Try whole-workbook XLSX export.
-    2) If that fails, discover tabs (title,gid) from edit HTML and fetch each tab via CSV export.
-    """
+    """1) Try XLSX; 2) fallback to CSV-per-sheet."""
     url_in = (sheet_url or config.DEFAULT_PUBLISHED_URL).strip()
     ssid = _extract_spreadsheet_id(url_in)
     if not ssid:
@@ -171,19 +154,17 @@ def load_workbook_from_gsheet(sheet_url: str) -> Dict[str, pd.DataFrame]:
     except Exception:
         st.info("XLSX export failed, using CSV-per-sheet fallback…")
 
-    # CSV-per-sheet fallback
+    # CSV fallback
     try:
-        name_gid_list = _sheet_list_from_html(url_in)
-        if not name_gid_list:
-            st.error("Could not discover sheet tabs (names/gids). Ensure the sheet is public or published.")
+        pairs = _sheet_list_from_html(url_in)
+        if not pairs:
+            st.error("Could not discover sheet tabs (names/gids). Make sure the sheet is public or published.")
             return {}
-
         sheets: Dict[str, pd.DataFrame] = {}
         headers = {"User-Agent": "Mozilla/5.0 (Streamlit Loader)"}
-        for title, gid in name_gid_list:
+        for title, gid in pairs:
             try:
-                csv_url = _csv_export_url(ssid, gid)
-                resp = requests.get(csv_url, timeout=60, headers=headers)
+                resp = requests.get(_csv_export_url(ssid, gid), timeout=60, headers=headers)
                 resp.raise_for_status()
                 df = pd.read_csv(io.StringIO(resp.content.decode("utf-8", errors="ignore")))
                 df = df.dropna(how="all").dropna(axis=1, how="all")
@@ -191,11 +172,7 @@ def load_workbook_from_gsheet(sheet_url: str) -> Dict[str, pd.DataFrame]:
                     sheets[title] = df
             except Exception:
                 continue
-
-        if sheets:
-            return sheets
-        st.warning("CSV fallback parsed no non-empty sheets.")
-        return {}
+        return sheets
     except Exception as e:
         st.exception(e)
         return {}
@@ -212,7 +189,7 @@ def _parse_numeric(s: pd.Series) -> pd.Series:
 
 
 # =========================================
-# SALES/NOB/ABV BRANCH DATA (kept)
+# BRANCH (Sales/NOB/ABV) — unchanged logic
 # =========================================
 def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     combined: List[pd.DataFrame] = []
@@ -244,7 +221,8 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         "ABVPercent": "ABVPercent",
     }
     for sheet_name, df in excel_data.items():
-        if sheet_name.strip().lower() == "liquidity":
+        # skip liquidity sheet; keep only configured branch sheets
+        if re.search(r"liquid", sheet_name, re.I):
             continue
         if sheet_name not in config.BRANCHES:
             continue
@@ -253,9 +231,11 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
 
         d = df.copy()
         d.columns = d.columns.astype(str).str.strip()
+
         for old, new in mapping.items():
             if old in d.columns and new not in d.columns:
                 d.rename(columns={old: new}, inplace=True)
+
         if "Date" not in d.columns:
             maybe = [c for c in d.columns if "date" in c.lower()]
             if maybe:
@@ -289,125 +269,88 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
 
 
 # =========================================
-# LIQUIDITY (wide → long for your layout)
+# LIQUIDITY (focus on Total/Change/%)
 # =========================================
-def _first_two_rows_look_like_headers(df: pd.DataFrame) -> bool:
-    if df.shape[0] < 2:
-        return False
-    r0 = df.iloc[0].tolist()
-    r1 = df.iloc[1].tolist()
-    # heuristic: many non-empty strings in first two rows
-    def count_str(xs): return sum(isinstance(x, str) and x.strip() != "" for x in xs)
-    return count_str(r0) >= max(1, int(0.4 * len(r0))) and count_str(r1) >= max(1, int(0.4 * len(r1)))
-
-
-def _clean_branch_from_header(h: str) -> str:
-    s = str(h).strip()
-    s = re.sub(r"\b(total\s*liquidity|change\s*in\s*liquid|%?\s*of\s*change)\b", "", s, flags=re.I)
-    s = s.replace("|", " ").replace("  ", " ").strip(" -|")
-    return s.strip()
-
-
-def process_liquidity_wide(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+def process_liquidity_report(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     """
-    Parse sheet that looks like:
-      DATE | [CASH, BANK, Total Liquidity, Change in Liquid, % of Change] x N branches
-    with branch name appearing in a merged header row above the 5 columns.
+    Flatten the Liquidity sheet (DATE + repeated block per branch):
+      ... | <Branch> Total Liquidity | Change in Liquidity | % of Change | ...
+    Output columns: Date | Branch | TotalLiquidity | ChangeLiquidity | PctChange
     """
-    # find liquidity-like tab
     liq_key = None
     for k in excel_data.keys():
-        if "liquid" in k.lower() or "cash" in k.lower():
+        if re.search(r"liquid", k, re.I):
             liq_key = k
             break
     if not liq_key:
         return pd.DataFrame()
 
-    raw = excel_data[liq_key].copy().dropna(how="all")
-    raw.columns = raw.columns.astype(str)
-
-    # If first two rows look like headers, combine them to form single-row headers
-    if _first_two_rows_look_like_headers(raw):
-        top = raw.iloc[0].astype(str).replace("nan", "").tolist()
-        sub = raw.iloc[1].astype(str).replace("nan", "").tolist()
-        new_cols = []
-        for a, b in zip(top, sub):
-            a = a.strip()
-            b = b.strip()
-            if a and b:
-                new_cols.append(f"{a} | {b}")
-            elif a:
-                new_cols.append(a)
-            elif b:
-                new_cols.append(b)
-            else:
-                new_cols.append("")
-        raw = raw.iloc[2:].reset_index(drop=True)
-        raw.columns = [c if c else f"col_{i}" for i, c in enumerate(new_cols)]
-    else:
-        # otherwise keep existing single header row
-        pass
-
-    # Find DATE column
-    date_candidates = [c for c in raw.columns if re.search(r"\bdate\b", str(c), re.I)]
-    if not date_candidates:
-        return pd.DataFrame()
-    date_col = date_candidates[0]
-
-    # Everything after DATE should be 5-col blocks per branch
-    cols = raw.columns.tolist()
-    try:
-        start_idx = cols.index(date_col) + 1
-    except ValueError:
+    raw = excel_data[liq_key].copy()
+    if raw.empty:
         return pd.DataFrame()
 
-    # Build blocks of size 5
-    block_size = 5
-    blocks: List[List[str]] = []
-    for i in range(start_idx, len(cols), block_size):
-        block = cols[i:i + block_size]
-        if len(block) == block_size:
-            blocks.append(block)
+    raw = raw.dropna(how="all").dropna(axis=1, how="all")
+    raw.columns = raw.columns.astype(str).str.strip()
 
-    if not blocks:
+    # DATE column (anywhere)
+    date_cols = [c for c in raw.columns if re.search(r"\bdate\b", c, re.I)]
+    if not date_cols:
+        return pd.DataFrame()
+    date_col = date_cols[0]
+
+    cols = list(raw.columns)
+
+    # Anchor on every "Total Liquidity" header; then take next 2 columns for Change/% (tolerant to slight header text)
+    total_idxs = [i for i, c in enumerate(cols) if re.search(r"total\s*liquid", c, re.I)]
+    parts: List[pd.DataFrame] = []
+
+    # helper to clean branch name from header cell text
+    def _branch_from_total(h: str) -> str:
+        s = re.sub(r"(?i)total\s*liquidity", "", str(h)).strip(" -|")
+        return s if s else "Branch"
+
+    for idx in total_idxs:
+        total_col = cols[idx]
+        change_col = cols[idx + 1] if idx + 1 < len(cols) else None
+        pct_col = cols[idx + 2] if idx + 2 < len(cols) else None
+
+        # ensure we don't accidentally pick a blank/separator column
+        ok_change = bool(change_col) and re.search(r"change", change_col, re.I)
+        ok_pct = bool(pct_col) and (re.search(r"%|percent", pct_col, re.I) or re.search(r"of\s*change", pct_col, re.I))
+
+        take = [date_col, total_col]
+        rename_map = {date_col: "Date", total_col: "TotalLiquidity"}
+
+        if ok_change:
+            take.append(change_col)  # type: ignore
+            rename_map[change_col] = "ChangeLiquidity"  # type: ignore
+        if ok_pct:
+            take.append(pct_col)  # type: ignore
+            rename_map[pct_col] = "PctChange"  # type: ignore
+
+        sub = raw[take].copy()
+        sub.rename(columns=rename_map, inplace=True)
+        sub["Branch"] = _branch_from_total(total_col)
+        parts.append(sub)
+
+    if not parts:
         return pd.DataFrame()
 
-    out_rows: List[pd.DataFrame] = []
-    for block in blocks:
-        # Attempt to infer branch name from any of the headers (prefer the 'Total Liquidity' col)
-        total_col = None
-        for c in block:
-            if re.search(r"total\s*liq", c, re.I):
-                total_col = c
-                break
-        branch_name_source = total_col or block[0]
-        branch_name = _clean_branch_from_header(branch_name_source)
-        if not branch_name:
-            # try to salvage by removing subheader tokens from all five and pick the longest
-            branch_name = _clean_branch_from_header(max(block, key=lambda s: len(str(s))))
+    df = pd.concat(parts, ignore_index=True)
 
-        sub = raw[[date_col] + block].copy()
-        # Normalize block column names to Cash/Bank/Total/Change/Pct
-        sub.columns = ["Date", "Cash", "Bank", "Total", "Change", "PctChange"]
-        sub["Branch"] = branch_name
-        out_rows.append(sub)
-
-    df = pd.concat(out_rows, ignore_index=True)
-
-    # Coerce types
+    # Types
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    for c in ["Cash", "Bank", "Total", "Change"]:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c].astype(str).str.replace(",", "", regex=False), errors="coerce")
+    df["TotalLiquidity"] = pd.to_numeric(df["TotalLiquidity"].astype(str).str.replace(",", "", regex=False), errors="coerce")
+    if "ChangeLiquidity" in df.columns:
+        df["ChangeLiquidity"] = pd.to_numeric(df["ChangeLiquidity"].astype(str).str.replace(",", "", regex=False), errors="coerce")
     if "PctChange" in df.columns:
         df["PctChange"] = pd.to_numeric(df["PctChange"].astype(str).str.replace("%", "", regex=False), errors="coerce")
 
-    df = df.dropna(subset=["Date"])
-    df = df.sort_values(["Date", "Branch"]).reset_index(drop=True)
+    df = df.dropna(subset=["Date"]).sort_values(["Date", "Branch"]).reset_index(drop=True)
     return df
 
 
-def liquidity_kpis(df: pd.DataFrame, start_date: datetime.date, end_date: datetime.date) -> Dict[str, Any]:
+def liquidity_kpis(df: pd.DataFrame, start_date, end_date) -> Dict[str, Any]:
     if df.empty:
         return {}
     f = df[(df["Date"].dt.date >= start_date) & (df["Date"].dt.date <= end_date)].copy()
@@ -415,84 +358,69 @@ def liquidity_kpis(df: pd.DataFrame, start_date: datetime.date, end_date: dateti
         return {}
 
     k: Dict[str, Any] = {}
-    # Sum across branches by day (Total = Cash + Bank OR use provided Total if present)
-    if "Total" in f:
-        totals = f.groupby("Date", as_index=False)["Total"].sum()
-    else:
-        temp = f.copy()
-        temp["Total"] = temp.get("Cash", 0).fillna(0) + temp.get("Bank", 0).fillna(0)
-        totals = temp.groupby("Date", as_index=False)["Total"].sum()
+    latest_date = f["Date"].max()
+    k["latest_date"] = latest_date.date()
 
-    k["latest_date"] = totals["Date"].max().date()
-    k["latest_total"] = float(totals.loc[totals["Date"] == totals["Date"].max(), "Total"].sum())
+    latest = f[f["Date"] == latest_date].copy()
+    k["latest_total_sum"] = float(latest["TotalLiquidity"].sum())
+    k["latest_change_sum"] = float(latest.get("ChangeLiquidity", pd.Series(dtype=float)).sum()) if "ChangeLiquidity" in latest else 0.0
+    k["latest_pct_avg"] = float(latest.get("PctChange", pd.Series(dtype=float)).mean()) if "PctChange" in latest else np.nan
 
-    # Flows (if present)
-    k["total_change"] = float(f.get("Change", pd.Series(dtype=float)).sum()) if "Change" in f else 0.0
-
-    # Per-branch snapshot (latest)
-    last = f["Date"].max()
-    snap = f[f["Date"] == last].copy()
-    if "Total" not in snap.columns:
-        snap["Total"] = snap.get("Cash", 0).fillna(0) + snap.get("Bank", 0).fillna(0)
-    k["snapshot"] = snap.groupby("Branch", as_index=True)["Total"].sum().sort_values(ascending=False)
+    # Best branch by latest total
+    top = latest.sort_values("TotalLiquidity", ascending=False).head(1)
+    if not top.empty:
+        k["top_branch"] = str(top["Branch"].iloc[0])
+        k["top_total"] = float(top["TotalLiquidity"].iloc[0])
 
     return k
 
 
-def liquidity_charts(df: pd.DataFrame, start_date: datetime.date, end_date: datetime.date) -> Dict[str, go.Figure]:
-    figs: Dict[str, go.Figure] = {"total_trend": go.Figure(), "branch_trend": go.Figure()}
+def liquidity_charts(df: pd.DataFrame, start_date, end_date) -> Dict[str, go.Figure]:
+    figs = {"total_trend": go.Figure(), "branch_trend": go.Figure()}
     if df.empty:
         return figs
-
     f = df[(df["Date"].dt.date >= start_date) & (df["Date"].dt.date <= end_date)].copy()
     if f.empty:
         return figs
 
-    # Total liquidity trend (sum all branches per day)
-    g = f.copy()
-    if "Total" not in g.columns:
-        g["Total"] = g.get("Cash", 0).fillna(0) + g.get("Bank", 0).fillna(0)
-    daily = g.groupby("Date", as_index=False)["Total"].sum()
-
+    # Total liquidity trend (sum across branches)
+    daily = f.groupby("Date", as_index=False)["TotalLiquidity"].sum()
     fig_total = go.Figure()
     fig_total.add_trace(
         go.Scatter(
-            x=daily["Date"], y=daily["Total"], mode="lines+markers", name="Total Liquidity",
+            x=daily["Date"], y=daily["TotalLiquidity"], mode="lines+markers", name="Total Liquidity",
             hovertemplate="Date: %{x|%Y-%m-%d}<br>Total: %{y:,.0f}<extra></extra>", line=dict(width=3)
         )
     )
     fig_total.update_layout(
-        title="Total Liquidity (All Branches)",
-        height=420, showlegend=True, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        title="Total Liquidity (All Branches)", height=420, showlegend=True,
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
         xaxis_title="Date", yaxis_title="SAR"
     )
+    figs["total_trend"] = fig_total
 
-    # Per-branch trend (Total)
+    # Per-branch totals
     fig_branch = go.Figure()
     for br in sorted(f["Branch"].dropna().unique()):
-        d = f[f["Branch"] == br].copy()
-        if "Total" not in d.columns:
-            d["Total"] = d.get("Cash", 0).fillna(0) + d.get("Bank", 0).fillna(0)
+        d = f[f["Branch"] == br]
         fig_branch.add_trace(
             go.Scatter(
-                x=d["Date"], y=d["Total"], mode="lines+markers", name=br,
+                x=d["Date"], y=d["TotalLiquidity"], mode="lines+markers", name=br,
                 hovertemplate=f"{br}<br>%{{x|%Y-%m-%d}} • %{y:,.0f}<extra></extra>", line=dict(width=2)
             )
         )
     fig_branch.update_layout(
-        title="Liquidity by Branch",
-        height=420, showlegend=True, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        title="Liquidity by Branch", height=420, showlegend=True,
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
         xaxis_title="Date", yaxis_title="SAR"
     )
-
-    figs["total_trend"] = fig_total
     figs["branch_trend"] = fig_branch
     return figs
 
 
-def liquidity_tables(df: pd.DataFrame, start_date: datetime.date, end_date: datetime.date) -> Dict[str, pd.DataFrame]:
+def liquidity_tables(df: pd.DataFrame, start_date, end_date) -> Dict[str, pd.DataFrame]:
     tbls: Dict[str, pd.DataFrame] = {}
     if df.empty:
         return tbls
@@ -500,19 +428,14 @@ def liquidity_tables(df: pd.DataFrame, start_date: datetime.date, end_date: date
     if f.empty:
         return tbls
 
-    dd = f.copy()
-    if "Total" not in dd.columns:
-        dd["Total"] = dd.get("Cash", 0).fillna(0) + dd.get("Bank", 0).fillna(0)
-
-    tbls["daily_total"] = dd.groupby("Date", as_index=False)["Total"].sum().sort_values("Date")
-    tbls["latest_by_branch"] = (
-        dd[dd["Date"] == dd["Date"].max()].groupby("Branch", as_index=True)["Total"].sum().sort_values(ascending=False)
-    ).to_frame("Total")
+    tbls["daily_total"] = f.groupby("Date", as_index=False)["TotalLiquidity"].sum().sort_values("Date")
+    latest = f[f["Date"] == f["Date"].max()].copy()
+    tbls["latest_by_branch"] = latest[["Branch", "TotalLiquidity"]].sort_values("TotalLiquidity", ascending=False).set_index("Branch")
     return tbls
 
 
 # =========================================
-# CHARTS (sales/NOB/ABV) — unchanged
+# SALES CHART HELPERS (unchanged)
 # =========================================
 def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool = True) -> go.Figure:
     if df.empty or "Date" not in df.columns or df["Date"].isna().all():
@@ -595,7 +518,7 @@ def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
 
 
 # =========================================
-# RENDER HELPERS — unchanged
+# RENDER HELPERS (unchanged)
 # =========================================
 def branch_status_class(pct: float) -> str:
     if pct >= 95:
@@ -652,12 +575,12 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
     st.markdown("### 🏆 Overall Performance")
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("💰 Total Sales", f"SAR {k.get('total_sales_actual',0):,.0f}", delta=f"vs Target: {k.get('overall_sales_percent',0):.1f}%")
-    variance_color = "normal" if k.get("total_sales_variance", 0) >= 0 else "inverse"
+    variance_color = "normal" if k.get('total_sales_variance', 0) >= 0 else "inverse"
     c2.metric("📊 Sales Variance", f"SAR {k.get('total_sales_variance',0):,.0f}", delta=f"{k.get('overall_sales_percent',0)-100:+.1f}%", delta_color=variance_color)
-    nob_color = "normal" if k.get("overall_nob_percent", 0) >= config.TARGETS['nob_achievement'] else "inverse"
+    nob_color = "normal" if k.get('overall_nob_percent', 0) >= config.TARGETS['nob_achievement'] else "inverse"
     c3.metric("🛍️ Total Baskets", f"{k.get('total_nob_actual',0):,.0f}", delta=f"Achievement: {k.get('overall_nob_percent',0):.1f}%", delta_color=nob_color)
     c4.metric("💎 Avg Basket Value", f"SAR {k.get('avg_abv_actual',0):,.2f}", delta=f"vs Target: {k.get('overall_abv_percent',0):.1f}%")
-    score_color = "normal" if k.get("performance_score", 0) >= 80 else "off"
+    score_color = "normal" if k.get('performance_score', 0) >= 80 else "off"
     c5.metric("⭐ Performance Score", f"{k.get('performance_score',0):.0f}/100", delta="Weighted Score", delta_color=score_color)
 
     if "branch_performance" in k and not k["branch_performance"].empty:
@@ -668,61 +591,44 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
         bp = k["branch_performance"].copy()
         df_table = (
             bp[["SalesPercent", "NOBPercent", "ABVPercent", "SalesActual", "SalesTarget"]]
-            .rename(
-                columns={
-                    "SalesPercent": "Sales %",
-                    "NOBPercent": "NOB %",
-                    "ABVPercent": "ABV %",
-                    "SalesActual": "Sales (Actual)",
-                    "SalesTarget": "Sales (Target)",
-                }
-            )
-            .round(1)
+            .rename(columns={
+                "SalesPercent": "Sales %",
+                "NOBPercent": "NOB %",
+                "ABVPercent": "ABV %",
+                "SalesActual": "Sales (Actual)",
+                "SalesTarget": "Sales (Target)",
+            }).round(1)
         )
         st.dataframe(
-            df_table.style.format(
-                {"Sales %": "{:,.1f}", "NOB %": "{:,.1f}", "ABV %": "{:,.1f}", "Sales (Actual)": "{:,.0f}", "Sales (Target)": "{:,.0f}"}
-            ),
+            df_table.style.format({"Sales %":"{:,.1f}","NOB %":"{:,.1f}","ABV %":"{:,.1f}","Sales (Actual)":"{:,.0f}","Sales (Target)":"{:,.0f}"}),
             use_container_width=True,
         )
-
         st.markdown("### 📉 Branch Performance Comparison")
-        fig_cmp = _branch_comparison_chart(bp)
-        st.plotly_chart(fig_cmp, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(_branch_comparison_chart(bp), use_container_width=True, config={"displayModeBar": False})
 
 
-# -------- Branch filter via toggle buttons (kept)
-def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> List[str]:
-    if "BranchName" not in df.columns:
+# -------------------------------
+# Branch filter UI (chips/multiselect)
+# -------------------------------
+def render_branch_filter_buttons(df: pd.DataFrame) -> List[str]:
+    branches = sorted(df["BranchName"].dropna().unique()) if "BranchName" in df else []
+    if not branches:
         return []
 
-    all_branches = sorted([b for b in df["BranchName"].dropna().unique()])
-    if "selected_branches" not in st.session_state:
-        st.session_state.selected_branches = all_branches.copy()
+    # default selection from session or all
+    default_sel = st.session_state.get("selected_branches", branches)
 
-    st.markdown("### 🏪 Branches")
-    col_a, col_b = st.columns([1, 6])
-    with col_a:
-        c1, c2 = st.columns(2)
-        if c1.button("Select all"):
-            st.session_state.selected_branches = all_branches.copy()
-            st.rerun()
-        if c2.button("Clear"):
-            st.session_state.selected_branches = []
-            st.rerun()
+    # light chip-like multiselect
+    selected = st.multiselect(
+        "Filter branches",
+        options=branches,
+        default=default_sel,
+        key="branch_multiselect",
+        help="Choose which branches to include in all charts & tables.",
+    )
 
-    with col_b:
-        btn_cols = st.columns(len(all_branches)) if all_branches else []
-        for i, b in enumerate(all_branches):
-            is_on = b in st.session_state.selected_branches
-            label = ("✅ " if is_on else "➕ ") + b
-            if btn_cols[i].button(label, key=f"{key_prefix}{i}"):
-                if is_on:
-                    st.session_state.selected_branches.remove(b)
-                else:
-                    st.session_state.selected_branches.append(b)
-                st.rerun()
-
+    # keep session in sync
+    st.session_state.selected_branches = selected if selected else branches
     return st.session_state.selected_branches
 
 
@@ -732,20 +638,20 @@ def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> L
 def main():
     apply_css()
 
-    # Load data
+    # Load workbook
     sheets_map = load_workbook_from_gsheet(config.DEFAULT_PUBLISHED_URL)
     if not sheets_map:
         st.warning("No non-empty sheets found.")
         st.stop()
 
-    # Sales/NOB/ABV (existing)
+    # Branch (original) data
     df_all = process_branch_data(sheets_map)
     if df_all.empty:
-        st.error("Could not process branch data. Check branch sheet names/columns.")
+        st.error("Could not process branch data. Check branch sheet names and columns.")
         st.stop()
 
-    # Liquidity (wide layout → long)
-    liq_df = process_liquidity_wide(sheets_map)
+    # Liquidity data
+    liq_df = process_liquidity_report(sheets_map)  # <- focuses on Total/Change/% only
 
     # Sidebar bounds
     all_branches = sorted(df_all["BranchName"].dropna().unique()) if "BranchName" in df_all else []
@@ -764,7 +670,7 @@ def main():
     if "end_date" not in st.session_state:
         st.session_state.end_date = dmax_sb
 
-    # -------- Sidebar --------
+    # Sidebar
     with st.sidebar:
         st.markdown('<div class="sb-title">📊 <span>AL KHAIR DASHBOARD</span></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-subtle">Filters affect all tabs.</div>', unsafe_allow_html=True)
@@ -783,7 +689,6 @@ def main():
             st.rerun()
 
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
-
         st.markdown('<div class="sb-section">Quick Range</div>', unsafe_allow_html=True)
         preset = st.radio("", ["Last 7d", "Last 30d", "This Month", "YTD", "All Time"], index=1, key="sb_quick_range")
         today = dmax_sb
@@ -810,7 +715,7 @@ def main():
 
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
 
-        # Snapshot
+        # Snapshot (sales)
         df_snap = df_for_bounds.copy()
         if "Date" in df_snap.columns and df_snap["Date"].notna().any():
             mask_snap = (df_snap["Date"].dt.date >= st.session_state.start_date) & (df_snap["Date"].dt.date <= st.session_state.end_date)
@@ -828,13 +733,12 @@ def main():
               <div>📊 <b>Variance:</b> {overall_sales_percent-100:+.1f}%</div>
               <div>🛍️ <b>Baskets:</b> {total_nob_actual:,.0f}</div>
             </div>
-            """,
-            unsafe_allow_html=True,
+            """, unsafe_allow_html=True,
         )
 
         st.markdown('<div class="sb-foot">UI preview • v2.0</div>', unsafe_allow_html=True)
 
-    # ------- Main header -------
+    # Header
     st.markdown(f"<div class='title'>📊 {config.PAGE_TITLE}</div>", unsafe_allow_html=True)
     date_span = ""
     if "Date" in df_all.columns and df_all["Date"].notna().any():
@@ -844,13 +748,10 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # ===== Mobile filter drawer =====
+    # Mobile filter
     st.markdown('<div class="mobile-only">', unsafe_allow_html=True)
     with st.expander("📱 Filters", expanded=False):
-        preset_m = st.radio(
-            "Quick range", ["Last 7d", "Last 30d", "This Month", "YTD", "All Time"],
-            index=1, horizontal=True, key="m_quick_range",
-        )
+        preset_m = st.radio("Quick range", ["Last 7d", "Last 30d", "This Month", "YTD", "All Time"], index=1, horizontal=True, key="m_quick_range")
         dmin_all = df_all["Date"].min().date() if "Date" in df_all else datetime.today().date()
         dmax_all = df_all["Date"].max().date() if "Date" in df_all else datetime.today().date()
         today_all = dmax_all
@@ -875,7 +776,7 @@ def main():
             st.session_state.start_date, st.session_state.end_date = dmin_all, dmax_all
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Apply branch filter (existing)
+    # Branch filter
     df = df_all.copy()
     if "BranchName" in df.columns:
         prev_sel = tuple(st.session_state.get("selected_branches", []))
@@ -889,18 +790,13 @@ def main():
             st.warning("No rows after branch filter.")
             st.stop()
 
-    # --- Date filter (existing) ---
+    # Date filter
     if "Date" in df.columns and df["Date"].notna().any():
         dmin = df["Date"].min().date()
         dmax = df["Date"].max().date()
-
-        if "start_date" not in st.session_state:
-            st.session_state.start_date = dmin
-        if "end_date" not in st.session_state:
-            st.session_state.end_date = dmax
-
-        s = st.session_state.start_date
-        e = st.session_state.end_date
+        if "start_date" not in st.session_state: st.session_state.start_date = dmin
+        if "end_date" not in st.session_state:   st.session_state.end_date = dmax
+        s = st.session_state.start_date; e = st.session_state.end_date
         if s < dmin or s > dmax: s = dmin
         if e > dmax or e < dmin: e = dmax
         if s > e: s, e = dmin, dmax
@@ -923,7 +819,7 @@ def main():
             st.warning("No rows in selected date range.")
             st.stop()
 
-    # KPIs + Quick insights (existing)
+    # KPIs and Quick Insights (same as before)
     def calc_kpis(df_in: pd.DataFrame) -> Dict[str, Any]:
         if df_in.empty:
             return {}
@@ -941,29 +837,18 @@ def main():
         if "BranchName" in df_in.columns:
             k["branch_performance"] = (
                 df_in.groupby("BranchName")
-                .agg(
-                    {
-                        "SalesTarget": "sum",
-                        "SalesActual": "sum",
-                        "SalesPercent": "mean",
-                        "NOBTarget": "sum",
-                        "NOBActual": "sum",
-                        "NOBPercent": "mean",
-                        "ABVTarget": "mean",
-                        "ABVActual": "mean",
-                        "ABVPercent": "mean",
-                    }
-                ).round(2)
+                .agg({
+                    "SalesTarget": "sum", "SalesActual": "sum", "SalesPercent": "mean",
+                    "NOBTarget": "sum", "NOBActual": "sum", "NOBPercent": "mean",
+                    "ABVTarget": "mean", "ABVActual": "mean", "ABVPercent": "mean",
+                }).round(2)
             )
         if "Date" in df_in.columns and df_in["Date"].notna().any():
             k["date_range"] = {"start": df_in["Date"].min(), "end": df_in["Date"].max(), "days": int(df_in["Date"].dt.date.nunique())}
         score = w = 0.0
-        if k.get("overall_sales_percent", 0) > 0:
-            score += min(k["overall_sales_percent"] / 100, 1.2) * 40; w += 40
-        if k.get("overall_nob_percent", 0) > 0:
-            score += min(k["overall_nob_percent"] / 100, 1.2) * 35; w += 35
-        if k.get("overall_abv_percent", 0) > 0:
-            score += min(k["overall_abv_percent"] / 100, 1.2) * 25; w += 25
+        if k.get("overall_sales_percent", 0) > 0: score += min(k["overall_sales_percent"] / 100, 1.2) * 40; w += 40
+        if k.get("overall_nob_percent", 0) > 0:   score += min(k["overall_nob_percent"] / 100, 1.2) * 35; w += 35
+        if k.get("overall_abv_percent", 0) > 0:   score += min(k["overall_abv_percent"] / 100, 1.2) * 25; w += 25
         k["performance_score"] = (score / w * 100) if w > 0 else 0.0
         return k
 
@@ -980,8 +865,7 @@ def main():
         if k.get("total_sales_variance", 0) < 0:
             insights.append(f"🟥 Overall variance negative by SAR {abs(k['total_sales_variance']):,.0f}")
         if insights:
-            for it in insights:
-                st.markdown("- " + it)
+            for it in insights: st.markdown("- " + it)
         else:
             st.write("All metrics look healthy for the current selection.")
 
@@ -1042,17 +926,16 @@ def main():
             )
 
     with t4:
-        st.markdown("### 💧 Liquidity Overview")
+        st.markdown("### 💧 Liquidity Report")
         if liq_df.empty:
-            st.info("No Liquidity data parsed. Ensure the 'Liquidity' tab uses the wide layout and the sheet is public, then click 🔄 Refresh Data.")
+            st.info("No Liquidity data parsed. Ensure the 'Liquidity' tab has columns like '… Total Liquidity | Change in Liquidity | % of Change' and the sheet is public. Then click 🔄 Refresh Data.")
         else:
             lk = liquidity_kpis(liq_df, st.session_state.start_date, st.session_state.end_date)
             c1, c2, c3 = st.columns(3)
-            c1.metric("💼 Latest Total", f"SAR {lk.get('latest_total',0):,.0f}", f"as of {lk.get('latest_date')}")
-            c2.metric("🔄 Sum of Change", f"SAR {lk.get('total_change',0):,.0f}")
-            if isinstance(lk.get("snapshot"), pd.Series) and not lk["snapshot"].empty:
-                top_branch = lk["snapshot"].idxmax()
-                c3.metric("🏦 Top Branch (latest)", top_branch, f"SAR {lk['snapshot'].max():,.0f}")
+            c1.metric("💼 Latest Total (sum)", f"SAR {lk.get('latest_total_sum',0):,.0f}", f"as of {lk.get('latest_date')}")
+            c2.metric("🔄 Latest Change (sum)", f"SAR {lk.get('latest_change_sum',0):,.0f}")
+            pct = lk.get("latest_pct_avg")
+            c3.metric("% Change (avg)", f"{pct:.1f}%" if pct==pct else "—")
 
             st.markdown("#### Charts")
             figs = liquidity_charts(liq_df, st.session_state.start_date, st.session_state.end_date)
@@ -1062,15 +945,21 @@ def main():
             st.markdown("#### Tables")
             tbls = liquidity_tables(liq_df, st.session_state.start_date, st.session_state.end_date)
             if "daily_total" in tbls:
-                st.dataframe(tbls["daily_total"].style.format({"Total": "{:,.0f}"}), use_container_width=True)
+                st.markdown("**Daily Total Liquidity (All Branches)**")
+                st.dataframe(
+                    tbls["daily_total"].style.format({"TotalLiquidity": "{:,.0f}"}),
+                    use_container_width=True
+                )
             if "latest_by_branch" in tbls:
-                st.markdown("**Latest Snapshot by Branch**")
-                st.dataframe(tbls["latest_by_branch"].style.format({"Total": "{:,.0f}"}), use_container_width=True)
+                st.markdown("**Latest by Branch**")
+                st.dataframe(
+                    tbls["latest_by_branch"].style.format({"TotalLiquidity": "{:,.0f}"}),
+                    use_container_width=True
+                )
 
 
+# =========================
+# ENTRYPOINT
+# =========================
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        st.error("❌ Application Error. Please adjust filters or refresh.")
-        st.exception(e)
+    main()
