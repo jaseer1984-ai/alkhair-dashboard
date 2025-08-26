@@ -74,7 +74,7 @@ def apply_css():
         .stTabs [data-baseweb="tab"]:nth-child(3)[aria-selected="true"] { background: linear-gradient(135deg,#8b5cf6 0%,#a78bfa 100%) !important; border-color:#a78bfa !important; }
         .stTabs [data-baseweb="tab"]:nth-child(4)[aria-selected="true"] { background: linear-gradient(135deg,#10b981 0%,#34d399 100%) !important; border-color:#34d399 !important; }
 
-        /* Sidebar (desktop look) */
+        /* Sidebar */
         [data-testid="stSidebar"] {
           background: #f7f9fc; border-right: 1px solid #e5e7eb; min-width: 280px; max-width: 320px;
         }
@@ -84,19 +84,14 @@ def apply_css():
         .sb-section { font-size:.80rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; color:#64748b; margin:12px 4px 6px; }
         .sb-card { background:#ffffff; border:1px solid #eef2f7; border-radius:14px; padding:12px; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
         .sb-hr { height:1px; background:#e5e7eb; margin:12px 0; border-radius:999px; }
-        .sb-foot { margin-top:10px; font-size:.75rem; color:#9ca3af; text-align:center; }
 
-        /* ---------- Mobile tweaks ---------- */
+        /* ---------- Mobile tweaks (keep sidebar visible) ---------- */
         @media (max-width: 680px) {
           .main .block-container { padding: 0.6rem 0.8rem; }
           .title { font-size: 1.3rem; }
           .subtitle { font-size: .85rem; }
           [data-testid="metric-container"] { padding:12px!important; }
-          [data-testid="stSidebar"] { display: none; } /* hide sidebar on phones */
-          .mobile-only { display: block !important; }
-          .desktop-only { display: none !important; }
         }
-        .mobile-only { display: none; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -535,41 +530,6 @@ def render_liquidity_tab(df: pd.DataFrame):
     )
 
 
-# -------- Branch filter via toggle buttons --------
-def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> List[str]:
-    if "BranchName" not in df.columns:
-        return []
-
-    all_branches = sorted([b for b in df["BranchName"].dropna().unique()])
-    if "selected_branches" not in st.session_state:
-        st.session_state.selected_branches = all_branches.copy()
-
-    st.markdown("### 🏪 Branches")
-    col_a, col_b = st.columns([1, 6])
-    with col_a:
-        c1, c2 = st.columns(2)
-        if c1.button("Select all"):
-            st.session_state.selected_branches = all_branches.copy()
-            st.rerun()
-        if c2.button("Clear"):
-            st.session_state.selected_branches = []
-            st.rerun()
-
-    with col_b:
-        btn_cols = st.columns(len(all_branches)) if all_branches else []
-        for i, b in enumerate(all_branches):
-            is_on = b in st.session_state.selected_branches
-            label = ("✅ " if is_on else "➕ ") + b
-            if btn_cols[i].button(label, key=f"{key_prefix}{i}"):
-                if is_on:
-                    st.session_state.selected_branches.remove(b)
-                else:
-                    st.session_state.selected_branches.append(b)
-                st.rerun()
-
-    return st.session_state.selected_branches
-
-
 # =========================================
 # MAIN
 # =========================================
@@ -587,43 +547,64 @@ def main():
         st.error("Could not process data. Check column names and sheet structure.")
         st.stop()
 
-    # Bounds for sidebar presets (based on current branches, initially all)
+    # All branches list
     all_branches = sorted(df_all["BranchName"].dropna().unique()) if "BranchName" in df_all else []
     if "selected_branches" not in st.session_state:
         st.session_state.selected_branches = list(all_branches)
 
-    df_for_bounds = df_all[df_all["BranchName"].isin(st.session_state.selected_branches)].copy() if all_branches else df_all.copy()
-    if "Date" in df_for_bounds.columns and df_for_bounds["Date"].notna().any():
-        dmin_sb = df_for_bounds["Date"].min().date()
-        dmax_sb = df_for_bounds["Date"].max().date()
-    else:
-        dmin_sb = dmax_sb = datetime.today().date()
-
-    if "start_date" not in st.session_state:
-        st.session_state.start_date = dmin_sb
-    if "end_date" not in st.session_state:
-        st.session_state.end_date = dmax_sb
-
-    # -------- Sidebar (Actions, Quick Range, Custom Date, Snapshot) --------
+    # ------- Sidebar: Actions + Filters (Branch + Date) -------
     with st.sidebar:
         st.markdown('<div class="sb-title">📊 <span>AL KHAIR DASHBOARD</span></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-subtle">Filters affect all tabs.</div>', unsafe_allow_html=True)
 
+        # Actions
         st.markdown('<div class="sb-section">Actions</div>', unsafe_allow_html=True)
         cols = st.columns(2)
         if cols[0].button("🔄 Refresh Data", use_container_width=True):
             load_workbook_from_gsheet.clear()
-            st.session_state.pop("start_date", None)
-            st.session_state.pop("end_date", None)
             st.rerun()
         if cols[1].button("🧹 Reset Filters", use_container_width=True):
             st.session_state.selected_branches = list(all_branches)
-            st.session_state.start_date = dmin_sb
-            st.session_state.end_date = dmax_sb
+            # recompute bounds from full data
+            if "Date" in df_all and df_all["Date"].notna().any():
+                st.session_state.start_date = df_all["Date"].min().date()
+                st.session_state.end_date = df_all["Date"].max().date()
             st.rerun()
 
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
 
+        # Branch filter
+        st.markdown('<div class="sb-section">Branches</div>', unsafe_allow_html=True)
+        cba, cbb = st.columns(2)
+        if cba.button("All", use_container_width=True, key="br_all"):
+            st.session_state.selected_branches = list(all_branches)
+        if cbb.button("None", use_container_width=True, key="br_none"):
+            st.session_state.selected_branches = []
+        sel = st.multiselect(
+            "Select branches",
+            options=all_branches,
+            default=st.session_state.selected_branches,
+            key="sb_branches",
+        )
+        st.session_state.selected_branches = sel
+
+        # Determine date bounds based on selected branches (fallback to all if empty)
+        df_for_bounds = (
+            df_all[df_all["BranchName"].isin(st.session_state.selected_branches)].copy()
+            if st.session_state.selected_branches else df_all.copy()
+        )
+        if "Date" in df_for_bounds.columns and df_for_bounds["Date"].notna().any():
+            dmin_sb = df_for_bounds["Date"].min().date()
+            dmax_sb = df_for_bounds["Date"].max().date()
+        else:
+            dmin_sb = dmax_sb = datetime.today().date()
+
+        if "start_date" not in st.session_state:
+            st.session_state.start_date = dmin_sb
+        if "end_date" not in st.session_state:
+            st.session_state.end_date = dmax_sb
+
+        # Quick range
         st.markdown('<div class="sb-section">Quick Range</div>', unsafe_allow_html=True)
         preset = st.radio("", ["Last 7d", "Last 30d", "This Month", "YTD", "All Time"], index=1, key="sb_quick_range")
         today = dmax_sb
@@ -640,6 +621,7 @@ def main():
         elif preset == "All Time":
             st.session_state.start_date, st.session_state.end_date = dmin_sb, dmax_sb
 
+        # Custom dates
         st.markdown('<div class="sb-section">Custom Date</div>', unsafe_allow_html=True)
         _sd = st.date_input("Start:", value=st.session_state.start_date, min_value=dmin_sb, max_value=dmax_sb, key="sb_sd")
         _ed = st.date_input("End:",   value=st.session_state.end_date,   min_value=dmin_sb, max_value=dmax_sb, key="sb_ed")
@@ -650,7 +632,7 @@ def main():
 
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
 
-        # Snapshot
+        # Optional "Today snapshot" (kept; remove if you don't want it)
         df_snap = df_for_bounds.copy()
         if "Date" in df_snap.columns and df_snap["Date"].notna().any():
             mask_snap = (df_snap["Date"].dt.date >= st.session_state.start_date) & (df_snap["Date"].dt.date <= st.session_state.end_date)
@@ -667,8 +649,7 @@ def main():
             """,
             unsafe_allow_html=True,
         )
-
-        st.markdown('<div class="sb-foot">UI preview • v2.0</div>', unsafe_allow_html=True)
+        # NOTE: removed the "UI preview • v2.0" footer (screenshot preview)
 
     # ------- Main header -------
     st.markdown(f"<div class='title'>📊 {config.PAGE_TITLE}</div>", unsafe_allow_html=True)
@@ -680,85 +661,11 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # ===== 📱 Mobile filter drawer =====
-    st.markdown('<div class="mobile-only">', unsafe_allow_html=True)
-    with st.expander("📱 Filters", expanded=False):
-        preset_m = st.radio(
-            "Quick range",
-            ["Last 7d", "Last 30d", "This Month", "YTD", "All Time"],
-            index=1,
-            horizontal=True,
-            key="m_quick_range",
-        )
-        dmin_all = df_all["Date"].min().date() if "Date" in df_all else datetime.today().date()
-        dmax_all = df_all["Date"].max().date() if "Date" in df_all else datetime.today().date()
-        today_all = dmax_all
-        if preset_m == "Last 7d":
-            st.session_state.start_date, st.session_state.end_date = max(dmin_all, today_all - timedelta(days=7)), today_all
-        elif preset_m == "Last 30d":
-            st.session_state.start_date, st.session_state.end_date = max(dmin_all, today_all - timedelta(days=30)), today_all
-        elif preset_m == "This Month":
-            first = today_all.replace(day=1)
-            st.session_state.start_date, st.session_state.end_date = max(dmin_all, first), today_all
-        elif preset_m == "YTD":
-            first = today_all.replace(month=1, day=1)
-            st.session_state.start_date, st.session_state.end_date = max(dmin_all, first), today_all
-        elif preset_m == "All Time":
-            st.session_state.start_date, st.session_state.end_date = dmin_all, dmax_all
-
-        _ms = st.date_input("Start date", value=st.session_state.start_date, min_value=dmin_all, max_value=dmax_all, key="m_start")
-        _me = st.date_input("End date",   value=st.session_state.end_date,   min_value=dmin_all, max_value=dmax_all, key="m_end")
-        st.session_state.start_date = max(dmin_all, min(_ms, dmax_all))
-        st.session_state.end_date   = max(dmin_all, min(_me, dmax_all))
-        if st.session_state.start_date > st.session_state.end_date:
-            st.session_state.start_date, st.session_state.end_date = dmin_all, dmax_all
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Apply branch filter (main page toggles)
+    # Apply filters (from sidebar) to the working dataframe
     df = df_all.copy()
-    if "BranchName" in df.columns:
-        prev_sel = tuple(st.session_state.get("selected_branches", []))
-        selected = render_branch_filter_buttons(df)
-        if selected:
-            df = df[df["BranchName"].isin(selected)].copy()
-        if tuple(selected) != prev_sel:
-            st.session_state.pop("start_date", None)
-            st.session_state.pop("end_date", None)
-        if df.empty:
-            st.warning("No rows after branch filter.")
-            st.stop()
-
-    # --- Date filter ---
+    if "BranchName" in df.columns and st.session_state.selected_branches:
+        df = df[df["BranchName"].isin(st.session_state.selected_branches)].copy()
     if "Date" in df.columns and df["Date"].notna().any():
-        dmin = df["Date"].min().date()
-        dmax = df["Date"].max().date()
-
-        if "start_date" not in st.session_state:
-            st.session_state.start_date = dmin
-        if "end_date" not in st.session_state:
-            st.session_state.end_date = dmax
-
-        s = st.session_state.start_date
-        e = st.session_state.end_date
-        if s < dmin or s > dmax:
-            s = dmin
-        if e > dmax or e < dmin:
-            e = dmax
-        if s > e:
-            s, e = dmin, dmax
-        st.session_state.start_date, st.session_state.end_date = s, e
-
-        c1, c2, _ = st.columns([2, 2, 6])
-        with c1:
-            start_d = st.date_input("Start Date", value=st.session_state.start_date, min_value=dmin, max_value=dmax, key="date_start")
-        with c2:
-            end_d = st.date_input("End Date", value=st.session_state.end_date, min_value=dmin, max_value=dmax, key="date_end")
-
-        st.session_state.start_date = max(dmin, min(start_d, dmax))
-        st.session_state.end_date = max(dmin, min(end_d, dmax))
-        if st.session_state.start_date > st.session_state.end_date:
-            st.session_state.start_date, st.session_state.end_date = dmin, dmax
-
         mask = (df["Date"].dt.date >= st.session_state.start_date) & (df["Date"].dt.date <= st.session_state.end_date)
         df = df.loc[mask].copy()
         if df.empty:
