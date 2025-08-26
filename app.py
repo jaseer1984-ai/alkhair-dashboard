@@ -392,54 +392,19 @@ def render_branch_cards(bp: pd.DataFrame):
                 )
 
 
-def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
-    st.markdown("### 🏆 Overall Performance")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("💰 Total Sales", f"SAR {k.get('total_sales_actual',0):,.0f}", delta=f"vs Target: {k.get('overall_sales_percent',0):.1f}%")
-    variance_color = "normal" if k.get("total_sales_variance", 0) >= 0 else "inverse"
-    c2.metric("📊 Sales Variance", f"SAR {k.get('total_sales_variance',0):,.0f}", delta=f"{k.get('overall_sales_percent',0)-100:+.1f}%", delta_color=variance_color)
-    nob_color = "normal" if k.get("overall_nob_percent", 0) >= config.TARGETS['nob_achievement'] else "inverse"
-    c3.metric("🛍️ Total Baskets", f"{k.get('total_nob_actual',0):,.0f}", delta=f"Achievement: {k.get('overall_nob_percent',0):.1f}%", delta_color=nob_color)
-    abv_color = "normal" if k.get("overall_abv_percent", 0) >= config.TARGETS['abv_achievement'] else "inverse"
-    c4.metric("💎 Avg Basket Value", f"SAR {k.get('avg_abv_actual',0):,.2f}", delta=f"vs Target: {k.get('overall_abv_percent',0):.1f}%")
-    score_color = "normal" if k.get("performance_score", 0) >= 80 else "off"
-    c5.metric("⭐ Performance Score", f"{k.get('performance_score',0):.0f}/100", delta="Weighted Score", delta_color=score_color)
-
-    if "branch_performance" in k and not k["branch_performance"].empty:
-        render_branch_cards(k["branch_performance"])
-
-    if "branch_performance" in k and not k["branch_performance"].empty:
-        st.markdown("### 📊 Comparison Table")
-        bp = k["branch_performance"].copy()
-        df_table = (
-            bp[["SalesPercent", "NOBPercent", "ABVPercent", "SalesActual", "SalesTarget"]]
-            .rename(
-                columns={
-                    "SalesPercent": "Sales %",
-                    "NOBPercent": "NOB %",
-                    "ABVPercent": "ABV %",
-                    "SalesActual": "Sales (Actual)",
-                    "SalesTarget": "Sales (Target)",
-                }
-            )
-            .round(1)
-        )
-        st.dataframe(
-            df_table.style.format(
-                {
-                    "Sales %": "{:,.1f}",
-                    "NOB %": "{:,.1f}",
-                    "ABV %": "{:,.1f}",
-                    "Sales (Actual)": "{:,.0f}",
-                    "Sales (Target)": "{:,.0f}",
-                }
-            ),
-            use_container_width=True,
-        )
-
-        st.markdown("### 📉 Branch Performance Comparison")
-        fig_cmp = _branch_comparison_chart(bp)
-        st.plotly_chart(fig_cmp, use_container_width=True, config={"displayModeBar": False})
+def render_sidebar_snapshot(ph: st.delta_generator.DeltaGenerator, df_for_snapshot: pd.DataFrame):
+    """Render the 'Today's Snapshot' card into the given placeholder using the FINAL filtered df."""
+    snap = calc_kpis(df_for_snapshot)
+    ph.markdown(
+        f"""
+        <div class="sb-card">
+          <div>💰 <b>Sales:</b> SAR {snap.get('total_sales_actual',0):,.0f}</div>
+          <div>📊 <b>Variance:</b> {snap.get('overall_sales_percent',0)-100:+.1f}%</div>
+          <div>🛍️ <b>Baskets:</b> {snap.get('total_nob_actual',0):,.0f}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # -------- Branch filter via toggle buttons (kept same on main page) --------
@@ -511,7 +476,7 @@ def main():
     if "end_date" not in st.session_state:
         st.session_state.end_date = dmax_sb
 
-    # -------- Sidebar (Actions, Quick Range, Custom Date, Snapshot) --------
+    # -------- Sidebar (Actions, Quick Range, Custom Date) + Snapshot placeholder --------
     with st.sidebar:
         st.markdown('<div class="sb-title">📊 <span>AL KHAIR DASHBOARD</span></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-subtle">Filters affect all tabs.</div>', unsafe_allow_html=True)
@@ -557,23 +522,9 @@ def main():
 
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
 
-        # Snapshot
-        df_snap = df_for_bounds.copy()
-        if "Date" in df_snap.columns and df_snap["Date"].notna().any():
-            mask_snap = (df_snap["Date"].dt.date >= st.session_state.start_date) & (df_snap["Date"].dt.date <= st.session_state.end_date)
-            df_snap = df_snap.loc[mask_snap]
-        snap = calc_kpis(df_snap)
+        # Snapshot placeholder (we will fill it later AFTER final filtering)
         st.markdown('<div class="sb-section">Today\'s Snapshot</div>', unsafe_allow_html=True)
-        st.markdown(
-            f"""
-            <div class="sb-card">
-              <div>💰 <b>Sales:</b> SAR {snap.get('total_sales_actual',0):,.0f}</div>
-              <div>📊 <b>Variance:</b> {snap.get('overall_sales_percent',0)-100:+.1f}%</div>
-              <div>🛍️ <b>Baskets:</b> {snap.get('total_nob_actual',0):,.0f}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        snapshot_ph = st.empty()  # <-- placeholder to update later
 
         st.markdown('<div class="sb-foot">UI preview • v2.0</div>', unsafe_allow_html=True)
 
@@ -635,7 +586,7 @@ def main():
             st.warning("No rows after branch filter.")
             st.stop()
 
-    # --- Date filter (unchanged) ---
+    # --- Date filter (FINALIZE DATES) ---
     if "Date" in df.columns and df["Date"].notna().any():
         dmin = df["Date"].min().date()
         dmax = df["Date"].max().date()
@@ -647,12 +598,9 @@ def main():
 
         s = st.session_state.start_date
         e = st.session_state.end_date
-        if s < dmin or s > dmax:
-            s = dmin
-        if e > dmax or e < dmin:
-            e = dmax
-        if s > e:
-            s, e = dmin, dmax
+        if s < dmin or s > dmax: s = dmin
+        if e > dmax or e < dmin: e = dmax
+        if s > e: s, e = dmin, dmax
         st.session_state.start_date, st.session_state.end_date = s, e
 
         c1, c2, _ = st.columns([2, 2, 6])
@@ -662,15 +610,19 @@ def main():
             end_d = st.date_input("End Date", value=st.session_state.end_date, min_value=dmin, max_value=dmax, key="date_end")
 
         st.session_state.start_date = max(dmin, min(start_d, dmax))
-        st.session_state.end_date = max(dmin, min(end_d, dmax))
+        st.session_state.end_date   = max(dmin, min(end_d, dmax))
         if st.session_state.start_date > st.session_state.end_date:
             st.session_state.start_date, st.session_state.end_date = dmin, dmax
 
+        # Apply FINAL mask for everything below (KPIs, charts AND the snapshot)
         mask = (df["Date"].dt.date >= st.session_state.start_date) & (df["Date"].dt.date <= st.session_state.end_date)
         df = df.loc[mask].copy()
         if df.empty:
             st.warning("No rows in selected date range.")
             st.stop()
+
+    # >>> NOW that df is fully filtered, update the sidebar snapshot placeholder <<<
+    render_sidebar_snapshot(snapshot_ph, df)
 
     # KPIs + Quick insights
     k = calc_kpis(df)
@@ -748,4 +700,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-   
+    except Exception:
+        st.error("❌ Application Error. Please adjust filters or refresh.")
