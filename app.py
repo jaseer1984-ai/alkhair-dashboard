@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import re
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -17,9 +17,9 @@ import plotly.graph_objects as go
 class Config:
     PAGE_TITLE = "Al Khair Business Performance"
     LAYOUT = "wide"
+    # You can keep your published CSV link here; loader supports csv/pubhtml/edit URLs.
     DEFAULT_PUBLISHED_URL = (
-        # <-- your published/public URL (pubhtml). We auto-convert it to XLSX export.
-        "https://docs.google.com/spreadsheets/d/e/2PACX-1vQG7boLWl2bNLCPR05NXv6EFpPPcFfXsiXPQ7rAGYr3q8Nkc2Ijg8BqEwVofcMLSg/pubhtml"
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vQG7boLWl2bNLCPR05NXv6EFpPPcFfXsiXPQ7rAGYr3q8Nkc2Ijg8BqEwVofcMLSg/pub?output=csv"
     )
     BRANCHES = {
         "Al khair - 102": {"name": "Al Khair", "code": "102", "color": "#3b82f6"},
@@ -47,7 +47,6 @@ def apply_css():
         .title { font-weight:900; font-size:1.6rem; margin-bottom:.25rem; }
         .subtitle { color:#6b7280; font-size:.95rem; margin-bottom:1rem; }
 
-        /* Metric tiles */
         [data-testid="metric-container"] {
             background:#fff !important; border-radius:16px !important; border:1px solid rgba(0,0,0,.06)!important; padding:18px!important;
         }
@@ -59,7 +58,6 @@ def apply_css():
         .pill.warn      { background:#fffbeb; color:#d97706; }
         .pill.danger    { background:#fef2f2; color:#dc2626; }
 
-        /* Tabs */
         .stTabs [data-baseweb="tab-list"] { gap: 8px; border-bottom: none; }
         .stTabs [data-baseweb="tab"] {
           border-radius: 10px 10px 0 0 !important;
@@ -73,7 +71,6 @@ def apply_css():
         .stTabs [data-baseweb="tab"]:nth-child(2)[aria-selected="true"] { background: linear-gradient(135deg,#3b82f6 0%,#60a5fa 100%) !important; border-color:#60a5fa !important; }
         .stTabs [data-baseweb="tab"]:nth-child(3)[aria-selected="true"] { background: linear-gradient(135deg,#8b5cf6 0%,#a78bfa 100%) !important; border-color:#a78bfa !important; }
 
-        /* Sidebar */
         [data-testid="stSidebar"] {
           background: #f7f9fc; border-right: 1px solid #e5e7eb; min-width: 280px; max-width: 320px;
         }
@@ -85,7 +82,6 @@ def apply_css():
         .sb-hr { height:1px; background:#e5e7eb; margin:12px 0; border-radius:999px; }
         .sb-foot { margin-top:10px; font-size:.75rem; color:#9ca3af; text-align:center; }
 
-        /* Mobile */
         @media (max-width: 680px) {
           .main .block-container { padding: 0.6rem 0.8rem; }
           .title { font-size: 1.3rem; }
@@ -103,12 +99,140 @@ def apply_css():
 
 
 # =========================================
-# LOADERS / HELPERS
+# LOADERS / HELPERS (robust for csv/pubhtml/edit)
 # =========================================
-def _pubhtml_to_xlsx(url: str) -> str:
-    if "docs.google.com/spreadsheets/d/e/" in url:
-        return re.sub(r"/pubhtml(.*)$", "/pub?output=xlsx", url.strip())
-    return url
+def _is_pub_csv(url: str) -> bool:
+    return "docs.google.com/spreadsheets/d/e/" in url and "/pub?output=csv" in url
+
+def _is_pubhtml(url: str) -> bool:
+    return "docs.google.com/spreadsheets/d/e/" in url and "/pubhtml" in url
+
+def _pubcsv_to_pubhtml(url: str) -> str:
+    return re.sub(r"/pub\?output=csv.*$", "/pubhtml", url.strip())
+
+def _csv_url_for_gid_from_pubhtml(pubhtml_url: str, gid: int) -> str:
+    base = re.sub(r"/pubhtml(?:\?.*)?$", "/pub", pubhtml_url.strip())
+    return f"{base}?single=true&gid={gid}&output=csv"
+
+def _discover_gids_from_pubhtml(pubhtml_url: str) -> List[Tuple[str, int]]:
+    headers = {"User-Agent": "Mozilla/5.0 (Streamlit Loader)"}
+    r = requests.get(pubhtml_url, timeout=60, headers=headers)
+    r.raise_for_status()
+    html = r.text
+    pairs: List[Tuple[str, int]] = []
+
+    # 1) Anchors with data-gid
+    for m in re.finditer(r'data-gid="(\d+)".*?>([^<]+)</a>', html, flags=re.I | re.S):
+        gid = int(m.group(1))
+        title = re.sub(r"\s+", " ", m.group(2)).strip()
+        if title and (title, gid) not in pairs:
+            pairs.append((title, gid))
+
+    # 2) Fallback to JS blob: "sheetId":123,"title":"Name"
+    if not pairs:
+        for m in re.finditer(r'"sheetId"\s*:\s*(\d+)\s*,\s*"title"\s*:\s*"([^"]+)"', html, flags=re.I):
+            gid = int(m.group(1)); title = m.group(2)
+            if (title, gid) not in pairs:
+                pairs.append((title, gid))
+
+    return pairs
+
+def _extract_spreadsheet_id_from_edit(url: str) -> Optional[str]:
+    m = re.search(r"/spreadsheets/d/([^/]+)/", url)
+    return m.group(1) if m else None
+
+def _xlsx_export_from_edit_id(sheet_id: str) -> str:
+    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
+
+@st.cache_data(show_spinner=False)
+def load_workbook_from_gsheet(url_in: str) -> Dict[str, pd.DataFrame]:
+    url = (url_in or config.DEFAULT_PUBLISHED_URL).strip()
+    headers = {"User-Agent": "Mozilla/5.0 (Streamlit Loader)"}
+
+    # Case 1: standard edit/share URL -> clean XLSX export
+    sid = _extract_spreadsheet_id_from_edit(url)
+    if sid:
+        try:
+            r = requests.get(_xlsx_export_from_edit_id(sid), timeout=60, headers=headers)
+            r.raise_for_status()
+            xls = pd.ExcelFile(io.BytesIO(r.content))
+            out: Dict[str, pd.DataFrame] = {}
+            for sn in xls.sheet_names:
+                df = xls.parse(sn).dropna(how="all").dropna(axis=1, how="all")
+                if not df.empty:
+                    out[sn] = df
+            if out:
+                return out
+        except Exception:
+            pass  # fall through
+
+    # Case 2: published CSV link
+    if _is_pub_csv(url):
+        gid_m = re.search(r"[?&]gid=(\d+)", url)
+        if gid_m:
+            try:
+                r = requests.get(url, timeout=60, headers=headers)
+                r.raise_for_status()
+                df = pd.read_csv(io.StringIO(r.content.decode("utf-8", errors="ignore"))).dropna(how="all").dropna(axis=1, how="all")
+                return {"Sheet": df} if not df.empty else {}
+            except Exception as e:
+                st.error(f"Failed to fetch CSV for gid {gid_m.group(1)}: {e}")
+                return {}
+        else:
+            pubhtml = _pubcsv_to_pubhtml(url)
+            pairs = _discover_gids_from_pubhtml(pubhtml)
+            if not pairs:
+                st.error("No sheet tabs discovered. Ensure the file is 'Published to the web' and public.")
+                return {}
+            out: Dict[str, pd.DataFrame] = {}
+            for title, gid in pairs:
+                try:
+                    csv_url = _csv_url_for_gid_from_pubhtml(pubhtml, gid)
+                    resp = requests.get(csv_url, timeout=60, headers=headers)
+                    resp.raise_for_status()
+                    df = pd.read_csv(io.StringIO(resp.content.decode("utf-8", errors="ignore"))).dropna(how="all").dropna(axis=1, how="all")
+                    if not df.empty:
+                        out[title] = df
+                except Exception:
+                    continue
+            return out
+
+    # Case 3: published HTML (pubhtml) -> discover + CSV per sheet
+    if _is_pubhtml(url):
+        pairs = _discover_gids_from_pubhtml(url)
+        if not pairs:
+            st.error("No sheet tabs discovered in pubhtml. Verify publish settings.")
+            return {}
+        out: Dict[str, pd.DataFrame] = {}
+        for title, gid in pairs:
+            try:
+                csv_url = _csv_url_for_gid_from_pubhtml(url, gid)
+                resp = requests.get(csv_url, timeout=60, headers=headers)
+                resp.raise_for_status()
+                df = pd.read_csv(io.StringIO(resp.content.decode("utf-8", errors="ignore"))).dropna(how="all").dropna(axis=1, how="all")
+                if not df.empty:
+                    out[title] = df
+            except Exception:
+                continue
+        return out
+
+    # Last resort: try open as XLSX directly (maybe already an export link)
+    try:
+        r = requests.get(url, timeout=60, headers=headers)
+        r.raise_for_status()
+        xls = pd.ExcelFile(io.BytesIO(r.content))
+        out: Dict[str, pd.DataFrame] = {}
+        for sn in xls.sheet_names:
+            df = xls.parse(sn).dropna(how="all").dropna(axis=1, how="all")
+            if not df.empty:
+                out[sn] = df
+        if out:
+            return out
+    except Exception:
+        pass
+
+    st.error("Unable to load Google Sheet from the provided URL.")
+    return {}
 
 
 def _parse_numeric(s: pd.Series) -> pd.Series:
@@ -118,21 +242,9 @@ def _parse_numeric(s: pd.Series) -> pd.Series:
     )
 
 
-@st.cache_data(show_spinner=False)
-def load_workbook_from_gsheet(published_url: str) -> Dict[str, pd.DataFrame]:
-    url = _pubhtml_to_xlsx((published_url or config.DEFAULT_PUBLISHED_URL).strip())
-    r = requests.get(url, timeout=60)
-    r.raise_for_status()
-    xls = pd.ExcelFile(io.BytesIO(r.content))
-    sheets: Dict[str, pd.DataFrame] = {}
-    for sn in xls.sheet_names:
-        df = xls.parse(sn)
-        df = df.dropna(how="all").dropna(axis=1, how="all")
-        if not df.empty:
-            sheets[sn] = df
-    return sheets
-
-
+# =========================================
+# DATA PROCESSING
+# =========================================
 def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     combined: List[pd.DataFrame] = []
     mapping = {
@@ -236,14 +348,11 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
 
     score = w = 0.0
     if k.get("overall_sales_percent", 0) > 0:
-        score += min(k["overall_sales_percent"] / 100, 1.2) * 40
-        w += 40
+        score += min(k["overall_sales_percent"] / 100, 1.2) * 40; w += 40
     if k.get("overall_nob_percent", 0) > 0:
-        score += min(k["overall_nob_percent"] / 100, 1.2) * 35
-        w += 35
+        score += min(k["overall_nob_percent"] / 100, 1.2) * 35; w += 35
     if k.get("overall_abv_percent", 0) > 0:
-        score += min(k["overall_abv_percent"] / 100, 1.2) * 25
-        w += 25
+        score += min(k["overall_abv_percent"] / 100, 1.2) * 25; w += 25
     k["performance_score"] = (score / w * 100) if w > 0 else 0.0
     return k
 
@@ -282,7 +391,7 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool 
             )
         )
         if daily_target is not None:
-            d_target = daily_target[daily_actual["BranchName"] == br]
+            d_target = daily_target[daily_target["BranchName"] == br]  # fixed: filter on daily_target
             fig.add_trace(
                 go.Scatter(
                     x=d_target["Date"],
@@ -435,7 +544,6 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
         st.plotly_chart(fig_cmp, use_container_width=True, config={"displayModeBar": False}, key="branch_perf_chart")
 
 
-# -------- Branch filter via toggle buttons --------
 def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> List[str]:
     if "BranchName" not in df.columns:
         return []
