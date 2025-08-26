@@ -91,13 +91,11 @@ def apply_css():
           .title { font-size: 1.3rem; }
           .subtitle { font-size: .85rem; }
           [data-testid="metric-container"] { padding:12px!important; }
-          /* Hide the sidebar on phones (still available via hamburger menu) */
           [data-testid="stSidebar"] { display: none; }
-          /* show mobile widgets */
           .mobile-only { display: block !important; }
           .desktop-only { display: none !important; }
         }
-        .mobile-only { display: none; }  /* hidden by default on desktop */
+        .mobile-only { display: none; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -108,9 +106,83 @@ def apply_css():
 # LOADERS / HELPERS
 # =========================================
 def _pubhtml_to_xlsx(url: str) -> str:
-    if "docs.google.com/spreadsheets/d/e/" in url:
-        return re.sub(r"/pubhtml(.*)$", "/pub?output=xlsx", url.strip())
-    return url
+    """
+    Convert a published 'pubhtml' URL into a best-guess XLSX download URL.
+    Supports both /d/e/ published links and direct /d/{id} links.
+    """
+    u = url.strip()
+    # Case 1: already a direct /d/{id} sheet URL -> use export?format=xlsx
+    m = re.search(r"docs\.google\.com/spreadsheets/d/([^/]+)/", u)
+    if m:
+        sid = m.group(1)
+        return f"https://docs.google.com/spreadsheets/d/{sid}/export?format=xlsx"
+    # Case 2: published /d/e/.../pubhtml links -> classic replacement
+    if "docs.google.com/spreadsheets/d/e/" in u and "/pubhtml" in u:
+        return re.sub(r"/pubhtml(\?.*)?$", "/pub?output=xlsx", u)
+    # Fallback: return original (caller may parse HTML)
+    return u
+
+
+@st.cache_data(show_spinner=False)
+def load_workbook_from_gsheet(published_url: str) -> Dict[str, pd.DataFrame]:
+    """
+    Resilient loader:
+      1) Try XLSX export (requests + ExcelFile)
+      2) If that fails, fetch the pubhtml and parse tables with pandas.read_html
+    Returns a dict of {sheet_name: DataFrame}. Sheet names may be generic when parsed from HTML.
+    """
+    url_in = (published_url or config.DEFAULT_PUBLISHED_URL).strip()
+
+    # ---------- Strategy 1: XLSX export ----------
+    xlsx_url = _pubhtml_to_xlsx(url_in)
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Streamlit Loader)"}
+        r = requests.get(xlsx_url, timeout=60, headers=headers)
+        r.raise_for_status()
+        xls = pd.ExcelFile(io.BytesIO(r.content))
+        sheets: Dict[str, pd.DataFrame] = {}
+        for sn in xls.sheet_names:
+            df = xls.parse(sn)
+            df = df.dropna(how="all").dropna(axis=1, how="all")
+            if not df.empty:
+                sheets[sn] = df
+        if sheets:
+            return sheets
+    except Exception:
+        st.info("XLSX export failed, falling back to HTML parsing…")
+
+    # ---------- Strategy 2: Parse published HTML ----------
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Streamlit Loader)"}
+        r = requests.get(url_in, timeout=60, headers=headers)
+        r.raise_for_status()
+        html = r.text
+
+        # Try to extract nicer sheet names if present.
+        names = re.findall(r'data-sheets-name="([^"]+)"', html)
+        tables = pd.read_html(html, flavor="bs4")  # returns List[DataFrame]
+
+        sheets: Dict[str, pd.DataFrame] = {}
+        for i, df in enumerate(tables):
+            df = df.dropna(how="all").dropna(axis=1, how="all")
+            if df.empty:
+                continue
+            name = names[i] if i < len(names) else f"Sheet{i+1}"
+            # Heuristic: first row as header when columns are 0..n and row 0 looks header-ish
+            if df.shape[0] > 1 and all(isinstance(x, str) for x in df.iloc[0].tolist()):
+                if all(isinstance(c, (int, np.integer)) for c in df.columns):
+                    df.columns = df.iloc[0]
+                    df = df[1:]
+            sheets[name] = df
+
+        if sheets:
+            return sheets
+        else:
+            st.warning("Parsed the HTML but found no non-empty tables.")
+            return {}
+    except Exception as e:
+        st.exception(e)
+        return {}
 
 
 def _parse_numeric(s: pd.Series) -> pd.Series:
@@ -120,25 +192,10 @@ def _parse_numeric(s: pd.Series) -> pd.Series:
     )
 
 
-@st.cache_data(show_spinner=False)
-def load_workbook_from_gsheet(published_url: str) -> Dict[str, pd.DataFrame]:
-    url = _pubhtml_to_xlsx((published_url or config.DEFAULT_PUBLISHED_URL).strip())
-    r = requests.get(url, timeout=60)
-    r.raise_for_status()
-    xls = pd.ExcelFile(io.BytesIO(r.content))
-    sheets: Dict[str, pd.DataFrame] = {}
-    for sn in xls.sheet_names:
-        df = xls.parse(sn)
-        df = df.dropna(how="all").dropna(axis=1, how="all")
-        if not df.empty:
-            sheets[sn] = df
-    return sheets
-
-
 def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     """
     Build the sales/NOB/ABV dataset from branch sheets ONLY.
-    Now explicitly skips the 'Liquidity' sheet to avoid conflicts.
+    Explicitly skips the 'Liquidity' sheet and any sheet not listed in BRANCHES.
     """
     combined: List[pd.DataFrame] = []
     mapping = {
@@ -169,14 +226,13 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         "ABVPercent": "ABVPercent",
     }
     for sheet_name, df in excel_data.items():
-        # ✅ Skip Liquidity or any non-branch sheets not in BRANCHES
         if sheet_name.strip().lower() == "liquidity":
             continue
         if sheet_name not in config.BRANCHES:
             continue
-
         if df.empty:
             continue
+
         d = df.copy()
         d.columns = d.columns.astype(str).str.strip()
         for old, new in mapping.items():
@@ -186,12 +242,15 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
             maybe = [c for c in d.columns if "date" in c.lower()]
             if maybe:
                 d.rename(columns={maybe[0]: "Date"}, inplace=True)
+
         d["Branch"] = sheet_name
         meta = config.BRANCHES.get(sheet_name, {})
         d["BranchName"] = meta.get("name", sheet_name)
         d["BranchCode"] = meta.get("code", "000")
+
         if "Date" in d.columns:
             d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
+
         for col in [
             "SalesTarget",
             "SalesActual",
@@ -205,11 +264,15 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         ]:
             if col in d.columns:
                 d[col] = _parse_numeric(d[col])
+
         combined.append(d)
+
     return pd.concat(combined, ignore_index=True) if combined else pd.DataFrame()
 
 
-# ---------- LIQUIDITY HELPERS ----------
+# =========================================
+# LIQUIDITY HELPERS
+# =========================================
 def _find_first(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     cols = {c.lower(): c for c in df.columns}
     for name in candidates:
@@ -308,6 +371,7 @@ def liquidity_charts(df: pd.DataFrame, start_date: datetime.date, end_date: date
     if f.empty:
         return figs
 
+    # Closing balance trend
     fig1 = go.Figure()
     if "Closing" in f:
         if "Bank" in f:
@@ -334,6 +398,7 @@ def liquidity_charts(df: pd.DataFrame, start_date: datetime.date, end_date: date
         xaxis_title="Date", yaxis_title="SAR"
     )
 
+    # Inflows vs Outflows
     fig2 = go.Figure()
     if "Inflow" in f or "Outflow" in f:
         daily = f.groupby("Date", as_index=False).agg({
@@ -387,7 +452,7 @@ def liquidity_tables(df: pd.DataFrame, start_date: datetime.date, end_date: date
 
 
 # =========================================
-# CHARTS
+# CHARTS (sales/NOB/ABV)
 # =========================================
 def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool = True) -> go.Figure:
     if df.empty or "Date" not in df.columns or df["Date"].isna().all():
@@ -531,7 +596,6 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
     c2.metric("📊 Sales Variance", f"SAR {k.get('total_sales_variance',0):,.0f}", delta=f"{k.get('overall_sales_percent',0)-100:+.1f}%", delta_color=variance_color)
     nob_color = "normal" if k.get("overall_nob_percent", 0) >= config.TARGETS['nob_achievement'] else "inverse"
     c3.metric("🛍️ Total Baskets", f"{k.get('total_nob_actual',0):,.0f}", delta=f"Achievement: {k.get('overall_nob_percent',0):.1f}%", delta_color=nob_color)
-    abv_color = "normal" if k.get("overall_abv_percent", 0) >= config.TARGETS['abv_achievement'] else "inverse"
     c4.metric("💎 Avg Basket Value", f"SAR {k.get('avg_abv_actual',0):,.2f}", delta=f"vs Target: {k.get('overall_abv_percent',0):.1f}%")
     score_color = "normal" if k.get("performance_score", 0) >= 80 else "off"
     c5.metric("⭐ Performance Score", f"{k.get('performance_score',0):.0f}/100", delta="Weighted Score", delta_color=score_color)
@@ -614,22 +678,22 @@ def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> L
 def main():
     apply_css()
 
-    # Load data first
+    # Load data first (resilient loader)
     sheets_map = load_workbook_from_gsheet(config.DEFAULT_PUBLISHED_URL)
     if not sheets_map:
         st.warning("No non-empty sheets found.")
         st.stop()
 
-    # Branch data (now strictly from known branch sheets)
+    # Branch data (from configured branch sheets only)
     df_all = process_branch_data(sheets_map)
     if df_all.empty:
         st.error("Could not process branch data. Check branch sheet names/columns.")
         st.stop()
 
-    # Liquidity sheet (optional, safe)
+    # Liquidity sheet (optional)
     liq_df = process_liquidity_sheet(sheets_map)
 
-    # Sidebar range bounds based on selected branches
+    # Bounds for sidebar presets (based on current branches, initially all)
     all_branches = sorted(df_all["BranchName"].dropna().unique()) if "BranchName" in df_all else []
     if "selected_branches" not in st.session_state:
         st.session_state.selected_branches = list(all_branches)
@@ -692,25 +756,23 @@ def main():
 
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
 
+        # Snapshot (quick numbers)
         df_snap = df_for_bounds.copy()
         if "Date" in df_snap.columns and df_snap["Date"].notna().any():
             mask_snap = (df_snap["Date"].dt.date >= st.session_state.start_date) & (df_snap["Date"].dt.date <= st.session_state.end_date)
             df_snap = df_snap.loc[mask_snap]
-        from_numbers = {
-            "total_sales_actual": float(df_snap.get("SalesActual", pd.Series(dtype=float)).sum()) if not df_snap.empty else 0.0,
-            "overall_sales_percent": (
-                float(df_snap.get("SalesActual", pd.Series(dtype=float)).sum()) /
-                max(1.0, float(df_snap.get("SalesTarget", pd.Series(dtype=float)).sum())) * 100
-            ) if not df_snap.empty else 0.0,
-            "total_nob_actual": float(df_snap.get("NOBActual", pd.Series(dtype=float)).sum()) if not df_snap.empty else 0.0,
-        }
+        total_sales_actual = float(df_snap.get("SalesActual", pd.Series(dtype=float)).sum()) if not df_snap.empty else 0.0
+        total_sales_target = float(df_snap.get("SalesTarget", pd.Series(dtype=float)).sum()) if not df_snap.empty else 0.0
+        overall_sales_percent = (total_sales_actual / total_sales_target * 100) if total_sales_target > 0 else 0.0
+        total_nob_actual = float(df_snap.get("NOBActual", pd.Series(dtype=float)).sum()) if not df_snap.empty else 0.0
+
         st.markdown('<div class="sb-section">Today\'s Snapshot</div>', unsafe_allow_html=True)
         st.markdown(
             f"""
             <div class="sb-card">
-              <div>💰 <b>Sales:</b> SAR {from_numbers['total_sales_actual']:,.0f}</div>
-              <div>📊 <b>Variance:</b> {from_numbers['overall_sales_percent']-100:+.1f}%</div>
-              <div>🛍️ <b>Baskets:</b> {from_numbers['total_nob_actual']:,.0f}</div>
+              <div>💰 <b>Sales:</b> SAR {total_sales_actual:,.0f}</div>
+              <div>📊 <b>Variance:</b> {overall_sales_percent-100:+.1f}%</div>
+              <div>🛍️ <b>Baskets:</b> {total_nob_actual:,.0f}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -728,7 +790,7 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # ===== 📱 Mobile filter drawer =====
+    # ===== 📱 Mobile filter drawer (visible only on phones) =====
     st.markdown('<div class="mobile-only">', unsafe_allow_html=True)
     with st.expander("📱 Filters", expanded=False):
         preset_m = st.radio(
@@ -762,7 +824,7 @@ def main():
             st.session_state.start_date, st.session_state.end_date = dmin_all, dmax_all
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Apply branch filter (main page toggles as before)
+    # Apply branch filter (main page toggles)
     df = df_all.copy()
     if "BranchName" in df.columns:
         prev_sel = tuple(st.session_state.get("selected_branches", []))
@@ -776,7 +838,7 @@ def main():
             st.warning("No rows after branch filter.")
             st.stop()
 
-    # --- Date filter (unchanged) ---
+    # --- Date filter ---
     if "Date" in df.columns and df["Date"].notna().any():
         dmin = df["Date"].min().date()
         dmax = df["Date"].max().date()
@@ -881,7 +943,7 @@ def main():
         else:
             st.write("All metrics look healthy for the current selection.")
 
-    # Tabs (Liquidity tab added only if we actually have liq_df)
+    # Tabs (add Liquidity if available)
     has_liquidity = not liq_df.empty
     if has_liquidity:
         t1, t2, t3, t4 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "📥 Export", "💧 Liquidity"])
@@ -977,5 +1039,4 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         st.error("❌ Application Error. Please adjust filters or refresh.")
-        # Show the real error to help debug instead of failing silently:
         st.exception(e)
