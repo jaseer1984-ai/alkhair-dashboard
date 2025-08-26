@@ -119,11 +119,6 @@ def apply_css():
         .sb-section{ font-size:.78rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; color:#64748b; margin:12px 4px 6px; }
         .sb-hr{ height:1px; background:#e5e7eb; margin:12px 0; border-radius:999px; }
 
-        /* Compact buttons in sidebar */
-        [data-testid="stSidebar"] button{
-          padding:6px 8px !important; font-size:0.9rem !important; min-height:32px !important; border-radius:10px !important;
-        }
-
         /* Center DF headers only */
         .stDataFrame table thead tr th { text-align: center !important; }
 
@@ -354,8 +349,7 @@ def _branch_color_by_name(name: str) -> str:
 def render_branch_cards(bp: pd.DataFrame):
     st.markdown("### 🏪 Branch Overview")
     if bp.empty:
-        st.info("No branch summary available.")
-        return
+        st.info("No branch summary available."); return
 
     items = list(bp.index)
     per_row = max(1, int(getattr(config, "CARDS_PER_ROW", 3)))
@@ -366,9 +360,7 @@ def render_branch_cards(bp: pd.DataFrame):
             col_idx = i + j
             with row[j]:
                 if col_idx >= len(items):
-                    st.empty()
-                    continue
-
+                    st.empty(); continue
                 br = items[col_idx]
                 r = bp.loc[br]
                 avg_pct = float(np.nanmean([r.get("SalesPercent",0), r.get("NOBPercent",0), r.get("ABVPercent",0)]) or 0)
@@ -407,7 +399,6 @@ def render_branch_cards(bp: pd.DataFrame):
 def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
     st.markdown("### 🏆 Overall Performance")
 
-    # equal-width metric row
     st.markdown('<div class="metrics-row">', unsafe_allow_html=True)
     c1, c2, c3, c4, c5 = st.columns(5, gap="small")
 
@@ -516,7 +507,7 @@ def main():
     if "selected_branches" not in st.session_state:
         st.session_state.selected_branches = list(all_branches)
 
-    # Sidebar
+    # Sidebar (no All/None buttons)
     with st.sidebar:
         st.markdown('<div class="sb-title">📊 <span>AL KHAIR DASHBOARD</span></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-subtle">Filters affect all tabs.</div>', unsafe_allow_html=True)
@@ -527,16 +518,6 @@ def main():
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
 
         st.markdown('<div class="sb-section">Branches</div>', unsafe_allow_html=True)
-
-        # >>> SMALL, CENTERED "All"/"None" buttons (fit sidebar neatly)
-        left_pad, mid, right_pad = st.columns([1, 2, 1])
-        with mid:
-            if st.button("All", use_container_width=True, key="btn_all_center"):
-                st.session_state.selected_branches = list(all_branches); st.rerun()
-            if st.button("None", use_container_width=True, key="btn_none_center"):
-                st.session_state.selected_branches = []; st.rerun()
-        # <<<
-
         sel: List[str] = []
         for i, b in enumerate(all_branches):
             if st.checkbox(b, value=(b in st.session_state.selected_branches), key=f"sb_br_{i}"):
@@ -587,7 +568,7 @@ def main():
         df = df.loc[mask].copy()
         if df.empty: st.warning("No rows in selected date range."); st.stop()
 
-    # Quick Insights (includes liquidity current date + 30d)
+    # Quick Insights (with liquidity info)
     k = calc_kpis(df)
     with st.expander("⚡ Quick Insights", expanded=True):
         insights: List[str] = []
