@@ -108,7 +108,7 @@ def apply_css():
           background:linear-gradient(90deg,#ef4444,#f97316,#22c55e,#3b82f6);
         }
 
-        /* Sidebar — narrower + smaller buttons */
+        /* Sidebar — narrower */
         [data-testid="stSidebar"]{
           background:#f7f9fc; border-right:1px solid #e5e7eb;
           width: 240px; min-width: 220px; max-width: 240px;
@@ -119,7 +119,7 @@ def apply_css():
         .sb-section{ font-size:.78rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; color:#64748b; margin:12px 4px 6px; }
         .sb-hr{ height:1px; background:#e5e7eb; margin:12px 0; border-radius:999px; }
 
-        /* make all sidebar buttons compact (All/None/Refresh) */
+        /* Compact buttons in sidebar */
         [data-testid="stSidebar"] button{
           padding:6px 8px !important; font-size:0.9rem !important; min-height:32px !important; border-radius:10px !important;
         }
@@ -527,9 +527,15 @@ def main():
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
 
         st.markdown('<div class="sb-section">Branches</div>', unsafe_allow_html=True)
-        ca, cb = st.columns(2)
-        if ca.button("All", use_container_width=True):  st.session_state.selected_branches = list(all_branches); st.rerun()
-        if cb.button("None", use_container_width=True): st.session_state.selected_branches = []; st.rerun()
+
+        # >>> SMALL, CENTERED "All"/"None" buttons (fit sidebar neatly)
+        left_pad, mid, right_pad = st.columns([1, 2, 1])
+        with mid:
+            if st.button("All", use_container_width=True, key="btn_all_center"):
+                st.session_state.selected_branches = list(all_branches); st.rerun()
+            if st.button("None", use_container_width=True, key="btn_none_center"):
+                st.session_state.selected_branches = []; st.rerun()
+        # <<<
 
         sel: List[str] = []
         for i, b in enumerate(all_branches):
@@ -581,7 +587,7 @@ def main():
         df = df.loc[mask].copy()
         if df.empty: st.warning("No rows in selected date range."); st.stop()
 
-    # Quick Insights (now includes Liquidity current-date line + 30d details)
+    # Quick Insights (includes liquidity current date + 30d)
     k = calc_kpis(df)
     with st.expander("⚡ Quick Insights", expanded=True):
         insights: List[str] = []
@@ -599,7 +605,6 @@ def main():
         if k.get("total_sales_variance", 0) < 0:
             insights.append(f"🟥 Overall variance negative by SAR {abs(k['total_sales_variance']):,.0f}")
 
-        # ---- Liquidity current date + 30d analytics ----
         if {"TotalLiquidity"}.issubset(df.columns):
             dliq = df.dropna(subset=["Date","TotalLiquidity"]).copy()
             if not dliq.empty:
@@ -608,7 +613,6 @@ def main():
                 cur_val = float(by_date.loc[by_date["Date"] == last_date, "TotalLiquidity"].sum())
                 insights.append(f"💧 Liquidity (latest {last_date.date()}): SAR {cur_val:,.0f}")
 
-                # 30d trend, peak ↑/↓ day
                 last30 = by_date.tail(30)
                 if len(last30) >= 2:
                     prev = float(last30["TotalLiquidity"].iloc[-2])
