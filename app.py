@@ -17,7 +17,7 @@ import plotly.graph_objects as go
 class Config:
     PAGE_TITLE = "Al Khair Business Performance"
     LAYOUT = "wide"
-    # Use your new XLSX link (best for multi-sheet)
+    # Use your XLSX link (best for multi-sheet). Loader also handles CSV fallback.
     DEFAULT_PUBLISHED_URL = (
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vROaePKJN3XhRor42BU4Kgd9fCAgW7W8vWJbwjveQWoJy8HCRBUAYh2s0AxGsBa3w/pub?output=xlsx"
     )
@@ -72,6 +72,7 @@ def apply_css():
         .stTabs [data-baseweb="tab"]:nth-child(1)[aria-selected="true"] { background: linear-gradient(135deg,#ef4444 0%,#f87171 100%) !important; border-color:#f87171 !important; }
         .stTabs [data-baseweb="tab"]:nth-child(2)[aria-selected="true"] { background: linear-gradient(135deg,#3b82f6 0%,#60a5fa 100%) !important; border-color:#60a5fa !important; }
         .stTabs [data-baseweb="tab"]:nth-child(3)[aria-selected="true"] { background: linear-gradient(135deg,#8b5cf6 0%,#a78bfa 100%) !important; border-color:#a78bfa !important; }
+        .stTabs [data-baseweb="tab"]:nth-child(4)[aria-selected="true"] { background: linear-gradient(135deg,#10b981 0%,#34d399 100%) !important; border-color:#34d399 !important; }
 
         /* Sidebar (desktop look) */
         [data-testid="stSidebar"] {
@@ -91,13 +92,11 @@ def apply_css():
           .title { font-size: 1.3rem; }
           .subtitle { font-size: .85rem; }
           [data-testid="metric-container"] { padding:12px!important; }
-          /* Hide the sidebar on phones (still available via hamburger menu) */
-          [data-testid="stSidebar"] { display: none; }
-          /* show mobile widgets */
+          [data-testid="stSidebar"] { display: none; } /* hide sidebar on phones */
           .mobile-only { display: block !important; }
           .desktop-only { display: none !important; }
         }
-        .mobile-only { display: none; }  /* hidden by default on desktop */
+        .mobile-only { display: none; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -110,8 +109,8 @@ def apply_css():
 def _normalize_gsheet_url(url: str) -> str:
     """Prefer XLSX for published Google Sheets; gracefully handle CSV if needed."""
     u = (url or "").strip()
-    u = re.sub(r"/pubhtml(\?.*)?$", "/pub?output=xlsx", u)            # /pubhtml → xlsx
-    u = re.sub(r"/pub\?output=csv(\&.*)?$", "/pub?output=xlsx", u)    # csv → xlsx
+    u = re.sub(r"/pubhtml(\?.*)?$", "/pub?output=xlsx", u)
+    u = re.sub(r"/pub\?output=csv(\&.*)?$", "/pub?output=xlsx", u)
     return u or url
 
 
@@ -156,6 +155,7 @@ def _parse_numeric(s: pd.Series) -> pd.Series:
 def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     combined: List[pd.DataFrame] = []
     mapping = {
+        # ---- Core columns ----
         "Date": "Date",
         "Day": "Day",
         "Sales Target": "SalesTarget",
@@ -181,6 +181,15 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         "ABVActual": "ABVActual",
         "ABV %": "ABVPercent",
         "ABVPercent": "ABVPercent",
+        # ---- Liquidity columns (L/M/N/O/P) ----
+        "BANK": "Bank",
+        "Bank": "Bank",
+        "CASH": "Cash",
+        "Cash": "Cash",
+        "TOTAL LIQUIDITY": "TotalLiquidity",
+        "Total Liquidity": "TotalLiquidity",
+        "Change in Liquidity": "ChangeLiquidity",
+        "% of Change": "PctChange",
     }
     for sheet_name, df in excel_data.items():
         if df.empty:
@@ -201,15 +210,11 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         if "Date" in d.columns:
             d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
         for col in [
-            "SalesTarget",
-            "SalesActual",
-            "SalesPercent",
-            "NOBTarget",
-            "NOBActual",
-            "NOBPercent",
-            "ABVTarget",
-            "ABVActual",
-            "ABVPercent",
+            "SalesTarget", "SalesActual", "SalesPercent",
+            "NOBTarget", "NOBActual", "NOBPercent",
+            "ABVTarget", "ABVActual", "ABVPercent",
+            # Liquidity fields:
+            "Bank", "Cash", "TotalLiquidity", "ChangeLiquidity", "PctChange",
         ]:
             if col in d.columns:
                 d[col] = _parse_numeric(d[col])
@@ -262,14 +267,11 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
 
     score = w = 0.0
     if k.get("overall_sales_percent", 0) > 0:
-        score += min(k["overall_sales_percent"] / 100, 1.2) * 40
-        w += 40
+        score += min(k["overall_sales_percent"] / 100, 1.2) * 40; w += 40
     if k.get("overall_nob_percent", 0) > 0:
-        score += min(k["overall_nob_percent"] / 100, 1.2) * 35
-        w += 35
+        score += min(k["overall_nob_percent"] / 100, 1.2) * 35; w += 35
     if k.get("overall_abv_percent", 0) > 0:
-        score += min(k["overall_abv_percent"] / 100, 1.2) * 25
-        w += 25
+        score += min(k["overall_abv_percent"] / 100, 1.2) * 25; w += 25
     k["performance_score"] = (score / w * 100) if w > 0 else 0.0
     return k
 
@@ -298,12 +300,8 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool 
         color = palette[i % len(palette)]
         fig.add_trace(
             go.Scatter(
-                x=d_actual["Date"],
-                y=d_actual[y_col],
-                name=f"{br} - Actual",
-                mode="lines+markers",
-                line=dict(width=3, color=color),
-                fill="tozeroy",
+                x=d_actual["Date"], y=d_actual[y_col], name=f"{br} - Actual",
+                mode="lines+markers", line=dict(width=3, color=color), fill="tozeroy",
                 hovertemplate=f"<b>{br}</b><br>Date: %{{x|%Y-%m-%d}}<br>Actual: %{{y:,.0f}}<extra></extra>",
             )
         )
@@ -311,25 +309,17 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool 
             d_target = daily_target[daily_target["BranchName"] == br]
             fig.add_trace(
                 go.Scatter(
-                    x=d_target["Date"],
-                    y=d_target[target_col],
-                    name=f"{br} - Target",
-                    mode="lines",
-                    line=dict(width=2, color=color, dash="dash"),
-                    fill=None,
+                    x=d_target["Date"], y=d_target[target_col], name=f"{br} - Target",
+                    mode="lines", line=dict(width=2, color=color, dash="dash"), fill=None,
                     hovertemplate=f"<b>{br}</b><br>Date: %{{x|%Y-%m-%d}}<br>Target: %{{y:,.0f}}<extra></extra>",
                     showlegend=False if len(sorted(daily_actual["BranchName"].unique())) > 1 else True,
                 )
             )
     fig.update_layout(
-        title=title,
-        height=420,
-        showlegend=True,
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
+        title=title, height=420, showlegend=True,
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
-        xaxis_title="Date",
-        yaxis_title="Value",
+        xaxis_title="Date", yaxis_title="Value",
     )
     return fig
 
@@ -345,14 +335,65 @@ def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
         y = bp[col].tolist()
         fig.add_trace(go.Bar(x=x, y=y, name=label, marker=dict(color=palette[i % len(palette)])))
     fig.update_layout(
-        barmode="group",
-        title="Branch Performance Comparison (%)",
-        xaxis_title="Branch",
-        yaxis_title="Percent",
-        height=400,
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
+        barmode="group", title="Branch Performance Comparison (%)",
+        xaxis_title="Branch", yaxis_title="Percent", height=400,
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+    )
+    return fig
+
+
+# ---- Liquidity charts ----
+def _liquidity_line(df: pd.DataFrame) -> go.Figure:
+    """Line chart: Total Liquidity over time, per branch."""
+    if df.empty or "Date" not in df or "TotalLiquidity" not in df:
+        return go.Figure()
+    d = df.dropna(subset=["Date", "TotalLiquidity"]).copy()
+    d = d.groupby(["Date", "BranchName"], as_index=False)["TotalLiquidity"].sum()
+
+    fig = go.Figure()
+    palette = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#14b8a6"]
+    for i, br in enumerate(sorted(d["BranchName"].unique())):
+        dd = d[d["BranchName"] == br]
+        fig.add_trace(
+            go.Scatter(
+                x=dd["Date"], y=dd["TotalLiquidity"], name=br,
+                mode="lines+markers", line=dict(width=3, color=palette[i % len(palette)]),
+                hovertemplate=f"<b>{br}</b><br>%{{x|%Y-%m-%d}}<br>Liquidity: SAR %{{y:,.0f}}<extra></extra>",
+            )
+        )
+    fig.update_layout(
+        title="Total Liquidity (SAR)", height=430, showlegend=True,
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+        xaxis_title="Date", yaxis_title="Amount (SAR)",
+    )
+    return fig
+
+
+def _liquidity_change_bar(df: pd.DataFrame) -> go.Figure:
+    """Bar chart: daily Change in Liquidity, per branch."""
+    if df.empty or "Date" not in df or "ChangeLiquidity" not in df:
+        return go.Figure()
+    d = df.dropna(subset=["Date", "ChangeLiquidity"]).copy()
+    d = d.groupby(["Date", "BranchName"], as_index=False)["ChangeLiquidity"].sum()
+
+    fig = go.Figure()
+    palette = ["#ef4444", "#3b82f6", "#8b5cf6", "#10b981", "#f59e0b", "#14b8a6"]
+    for i, br in enumerate(sorted(d["BranchName"].unique())):
+        dd = d[d["BranchName"] == br]
+        fig.add_trace(
+            go.Bar(
+                x=dd["Date"], y=dd["ChangeLiquidity"], name=br,
+                marker=dict(color=palette[i % len(palette)]),
+                hovertemplate=f"<b>{br}</b><br>%{{x|%Y-%m-%d}}<br>Change: SAR %{{y:,.0f}}<extra></extra>",
+            )
+        )
+    fig.update_layout(
+        barmode="group", title="Change in Liquidity (SAR) — Daily",
+        height=430, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+        xaxis_title="Date", yaxis_title="Amount (SAR)",
     )
     return fig
 
@@ -419,7 +460,6 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
     c2.metric("📊 Sales Variance", f"SAR {k.get('total_sales_variance',0):,.0f}", delta=f"{k.get('overall_sales_percent',0)-100:+.1f}%", delta_color=variance_color)
     nob_color = "normal" if k.get("overall_nob_percent", 0) >= config.TARGETS['nob_achievement'] else "inverse"
     c3.metric("🛍️ Total Baskets", f"{k.get('total_nob_actual',0):,.0f}", delta=f"Achievement: {k.get('overall_nob_percent',0):.1f}%", delta_color=nob_color)
-    abv_color = "normal" if k.get("overall_abv_percent", 0) >= config.TARGETS['abv_achievement'] else "inverse"
     c4.metric("💎 Avg Basket Value", f"SAR {k.get('avg_abv_actual',0):,.2f}", delta=f"vs Target: {k.get('overall_abv_percent',0):.1f}%")
     score_color = "normal" if k.get("performance_score", 0) >= 80 else "off"
     c5.metric("⭐ Performance Score", f"{k.get('performance_score',0):.0f}/100", delta="Weighted Score", delta_color=score_color)
@@ -459,6 +499,39 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
         st.markdown("### 📉 Branch Performance Comparison")
         fig_cmp = _branch_comparison_chart(bp)
         st.plotly_chart(fig_cmp, use_container_width=True, config={"displayModeBar": False})
+
+
+def render_liquidity_tab(df: pd.DataFrame):
+    need_cols = {"TotalLiquidity", "ChangeLiquidity", "PctChange"}
+    if not need_cols.issubset(set(df.columns)):
+        st.info("Liquidity columns not found. Please include 'TOTAL LIQUIDITY', 'Change in Liquidity', and '% of Change' in your sheet.")
+        return
+
+    tl_total = float(df["TotalLiquidity"].sum(skipna=True))
+    chg_total = float(df["ChangeLiquidity"].sum(skipna=True))
+    pct_mean = float(df["PctChange"].replace([np.inf, -np.inf], np.nan).dropna().mean()) if "PctChange" in df else 0.0
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("💧 Total Liquidity (sum)", f"SAR {tl_total:,.0f}")
+    c2.metric("🔁 Total Change (sum)", f"SAR {chg_total:,.0f}", delta=f"{('+' if chg_total>=0 else '')}{chg_total:,.0f}")
+    c3.metric("📈 Avg % Change", f"{pct_mean:,.2f}%")
+    last_date = df["Date"].max() if "Date" in df and df["Date"].notna().any() else None
+    if last_date:
+        d_last = df[df["Date"] == last_date]
+        c4.metric("🗓 Latest Date", last_date.strftime("%Y-%m-%d"), delta=f"Rows: {len(d_last):,}")
+
+    st.plotly_chart(_liquidity_line(df), use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(_liquidity_change_bar(df), use_container_width=True, config={"displayModeBar": False})
+
+    st.markdown("#### Detail")
+    show_cols = [c for c in ["Date", "BranchName", "Bank", "Cash", "TotalLiquidity", "ChangeLiquidity", "PctChange"] if c in df.columns]
+    tbl = df[show_cols].copy()
+    if "PctChange" in tbl.columns:
+        tbl["PctChange"] = tbl["PctChange"].map(lambda x: f"{x:,.2f}%" if pd.notna(x) else "")
+    st.dataframe(
+        tbl.sort_values(["Date", "BranchName"]) if "Date" in tbl else tbl,
+        use_container_width=True,
+    )
 
 
 # -------- Branch filter via toggle buttons --------
@@ -606,7 +679,7 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # ===== 📱 Mobile filter drawer (visible only on phones via CSS) =====
+    # ===== 📱 Mobile filter drawer =====
     st.markdown('<div class="mobile-only">', unsafe_allow_html=True)
     with st.expander("📱 Filters", expanded=False):
         preset_m = st.radio(
@@ -711,7 +784,7 @@ def main():
             st.write("All metrics look healthy for the current selection.")
 
     # Tabs
-    t1, t2, t3 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "📥 Export"])
+    t1, t2, t3, t4 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "💧 Liquidity", "📥 Export"])
     with t1:
         render_overview(df, k)
 
@@ -722,9 +795,11 @@ def main():
             opts = ["Last 7 Days", "Last 30 Days", "Last 3 Months", "All Time"]
             choice = st.selectbox("Time Period", opts, index=1, key="trend_window")
             today = (df["Date"].max() if df["Date"].notna().any() else pd.Timestamp.today()).date()
-            start = {"Last 7 Days": today - timedelta(days=7),
-                     "Last 30 Days": today - timedelta(days=30),
-                     "Last 3 Months": today - timedelta(days=90)}.get(choice, df["Date"].min().date())
+            start = {
+                "Last 7 Days": today - timedelta(days=7),
+                "Last 30 Days": today - timedelta(days=30),
+                "Last 3 Months": today - timedelta(days=90),
+            }.get(choice, df["Date"].min().date())
             f = df[(df["Date"].dt.date >= start) & (df["Date"].dt.date <= today)].copy()
         else:
             f = df.copy()
@@ -740,6 +815,9 @@ def main():
                             use_container_width=True, config={"displayModeBar": False})
 
     with t3:
+        render_liquidity_tab(df)
+
+    with t4:
         if df.empty:
             st.info("No data to export.")
         else:
@@ -768,7 +846,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        # Show the real error while you finalize the sheet/publishing settings
-        st.exception(e)
-        # To hide details later, replace with:
-        # st.error("❌ Application Error. Please adjust filters or refresh.")
+        st.exception(e)  # show real traceback while setting up
+        # Later you can replace with: st.error("❌ Application Error. Please adjust filters or refresh.")
