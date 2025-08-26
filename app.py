@@ -25,7 +25,7 @@ class Config:
     PAGE_TITLE = "Al Khair Business Performance"
     LAYOUT = "wide"
     DEFAULT_PUBLISHED_URL = (
-        "https://docs.google.com/spreadsheets/d/e/2PACX-1vROaePKJN3XhRor42BU4Kgd9fCAgW7W8vWJbwjveQWoJy8HCRBUAYh2s0AxGsBa3w/pub?output=csv"
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vROaePKJN3XhRor42BU4Kgd9fCAgW7W8vWJbwjveQWoJy8HCRBUAYh2s0AxGsBa3w/pub?output=xlsx"
     )
     BRANCHES = {
         "Al khair - 102": {"name": "Al Khair", "code": "102", "color": "#3b82f6"},
@@ -1592,3 +1592,4 @@ if __name__ == "__main__":
         logger.critical(f"Critical application error: {str(e)}")
         st.error("❌ Critical error occurred. Please refresh the page.")
         st.exception(e)
+
