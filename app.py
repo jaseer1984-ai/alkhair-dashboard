@@ -19,7 +19,7 @@ class Config:
     LAYOUT = "wide"
     # Use your stable published link; xlsx keeps ALL tabs.
     DEFAULT_PUBLISHED_URL = (
-        "https://docs.google.com/spreadsheets/d/e/2PACX-1vRYrhOc1N4ipUj55mwiXSLC_Qsw0efmAzKhfhnWtVOV2tP9gLEs2VO3I91pF9kdgg/pub?output=xlsx"
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vROaePKJN3XhRor42BU4Kgd9fCAgW7W8vWJbwjveQWoJy8HCRBUAYh2s0AxGsBa3w/pub?output=csv"
     )
     BRANCHES = {
         "Al khair - 102": {"name": "Al Khair", "code": "102", "color": "#3b82f6"},
@@ -602,3 +602,4 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         st.error(f"❌ Application Error: {type(e).__name__}: {e}")
+
