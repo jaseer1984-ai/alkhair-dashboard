@@ -460,7 +460,8 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
     c2.metric("📊 Sales Variance", f"SAR {k.get('total_sales_variance',0):,.0f}", delta=f"{k.get('overall_sales_percent',0)-100:+.1f}%", delta_color=variance_color)
     nob_color = "normal" if k.get("overall_nob_percent", 0) >= config.TARGETS['nob_achievement'] else "inverse"
     c3.metric("🛍️ Total Baskets", f"{k.get('total_nob_actual',0):,.0f}", delta=f"Achievement: {k.get('overall_nob_percent',0):.1f}%", delta_color=nob_color)
-    c4.metric("💎 Avg Basket Value", f"SAR {k.get('avg_abv_actual',0):,.2f}", delta=f"vs Target: {k.get('overall_abv_percent',0):.1f}%")
+    abv_color = "normal" if k.get("overall_abv_percent", 0) >= config.TARGETS['abv_achievement'] else "inverse"
+    c4.metric("💎 Avg Basket Value", f"SAR {k.get('avg_abv_actual',0):,.2f}", delta=f"vs Target: {k.get('overall_abv_percent',0):.1f}%", delta_color=abv_color)
     score_color = "normal" if k.get("performance_score", 0) >= 80 else "off"
     c5.metric("⭐ Performance Score", f"{k.get('performance_score',0):.0f}/100", delta="Weighted Score", delta_color=score_color)
 
@@ -764,19 +765,66 @@ def main():
             st.warning("No rows in selected date range.")
             st.stop()
 
+    # ======================
     # KPIs + Quick insights
+    # ======================
     k = calc_kpis(df)
     with st.expander("⚡ Quick Insights", expanded=True):
         insights: List[str] = []
-        if "branch_performance" in k and not k["branch_performance"].empty:
+
+        # ---- Sales / NOB / ABV ----
+        if "branch_performance" in k and isinstance(k["branch_performance"], pd.DataFrame) and not k["branch_performance"].empty:
             bp = k["branch_performance"]
-            insights.append(f"🥇 Best Sales %: {bp['SalesPercent'].idxmax()} — {bp['SalesPercent'].max():.1f}%")
-            insights.append(f"🔻 Lowest Sales %: {bp['SalesPercent'].idxmin()} — {bp['SalesPercent'].min():.1f}%")
+            try:
+                insights.append(f"🥇 Best Sales %: {bp['SalesPercent'].idxmax()} — {bp['SalesPercent'].max():.1f}%")
+                insights.append(f"🔻 Lowest Sales %: {bp['SalesPercent'].idxmin()} — {bp['SalesPercent'].min():.1f}%")
+            except Exception:
+                pass
             below = bp[bp["SalesPercent"] < config.TARGETS["sales_achievement"]].index.tolist()
             if below:
                 insights.append("⚠️ Below 95% target: " + ", ".join(below))
         if k.get("total_sales_variance", 0) < 0:
             insights.append(f"🟥 Overall variance negative by SAR {abs(k['total_sales_variance']):,.0f}")
+
+        # ---- Liquidity (TotalLiquidity / ChangeLiquidity / PctChange) ----
+        if {"TotalLiquidity", "ChangeLiquidity"}.issubset(df.columns):
+            dliq = df.copy()
+
+            # Net movement in selected range
+            net_chg = float(dliq["ChangeLiquidity"].sum(skipna=True))
+            if not np.isnan(net_chg):
+                arrow = "↑" if net_chg > 0 else ("↓" if net_chg < 0 else "→")
+                insights.append(f"💧 Net liquidity movement: {arrow} SAR {net_chg:+,.0f}")
+
+            # Average % change across rows
+            if "PctChange" in dliq.columns:
+                mean_pct = float(dliq["PctChange"].replace([np.inf, -np.inf], np.nan).dropna().mean())
+                if pd.notna(mean_pct):
+                    insights.append(f"📈 Avg % change in liquidity: {mean_pct:,.2f}%")
+
+            # Biggest ups/downs by branch
+            if "BranchName" in dliq.columns and dliq["BranchName"].notna().any():
+                by_branch = dliq.groupby("BranchName")["ChangeLiquidity"].sum()
+                if not by_branch.empty:
+                    top_br, top_val = by_branch.idxmax(), float(by_branch.max())
+                    if pd.notna(top_val) and top_val > 0:
+                        insights.append(f"🏦 Biggest ↑ by branch: {top_br} — SAR {top_val:,.0f}")
+                    bot_br, bot_val = by_branch.idxmin(), float(by_branch.min())
+                    if pd.notna(bot_val) and bot_val < 0:
+                        insights.append(f"🏦 Biggest ↓ by branch: {bot_br} — SAR {bot_val:,.0f}")
+
+            # Peak increase/decrease days (aggregate across branches)
+            if "Date" in dliq.columns and dliq["Date"].notna().any():
+                by_date = dliq.groupby("Date")["ChangeLiquidity"].sum()
+                if not by_date.empty:
+                    peak_day, peak_val = by_date.idxmax(), float(by_date.max())
+                    if pd.notna(peak_val) and peak_val > 0:
+                        insights.append(f"📅 Peak ↑ day: {peak_day.date()} — SAR {peak_val:,.0f}")
+                    trough_day, trough_val = by_date.idxmin(), float(by_date.min())
+                    if pd.notna(trough_val) and trough_val < 0:
+                        insights.append(f"📅 Peak ↓ day: {trough_day.date()} — SAR {trough_val:,.0f}")
+
+        # Render list
         if insights:
             for it in insights:
                 st.markdown("- " + it)
