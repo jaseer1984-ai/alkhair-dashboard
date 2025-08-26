@@ -18,6 +18,7 @@ class Config:
     PAGE_TITLE = "Al Khair Business Performance"
     LAYOUT = "wide"
     DEFAULT_PUBLISHED_URL = (
+        # <-- your published/public URL (pubhtml). We auto-convert it to XLSX export.
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vQG7boLWl2bNLCPR05NXv6EFpPPcFfXsiXPQ7rAGYr3q8Nkc2Ijg8BqEwVofcMLSg/pubhtml"
     )
     BRANCHES = {
@@ -72,7 +73,7 @@ def apply_css():
         .stTabs [data-baseweb="tab"]:nth-child(2)[aria-selected="true"] { background: linear-gradient(135deg,#3b82f6 0%,#60a5fa 100%) !important; border-color:#60a5fa !important; }
         .stTabs [data-baseweb="tab"]:nth-child(3)[aria-selected="true"] { background: linear-gradient(135deg,#8b5cf6 0%,#a78bfa 100%) !important; border-color:#a78bfa !important; }
 
-        /* Sidebar (desktop look) */
+        /* Sidebar */
         [data-testid="stSidebar"] {
           background: #f7f9fc; border-right: 1px solid #e5e7eb; min-width: 280px; max-width: 320px;
         }
@@ -84,19 +85,17 @@ def apply_css():
         .sb-hr { height:1px; background:#e5e7eb; margin:12px 0; border-radius:999px; }
         .sb-foot { margin-top:10px; font-size:.75rem; color:#9ca3af; text-align:center; }
 
-        /* ---------- Mobile tweaks ---------- */
+        /* Mobile */
         @media (max-width: 680px) {
           .main .block-container { padding: 0.6rem 0.8rem; }
           .title { font-size: 1.3rem; }
           .subtitle { font-size: .85rem; }
           [data-testid="metric-container"] { padding:12px!important; }
-          /* Hide the sidebar on phones (still available via hamburger menu) */
           [data-testid="stSidebar"] { display: none; }
-          /* show mobile widgets */
           .mobile-only { display: block !important; }
           .desktop-only { display: none !important; }
         }
-        .mobile-only { display: none; }  /* hidden by default on desktop */
+        .mobile-only { display: none; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -182,15 +181,9 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         if "Date" in d.columns:
             d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
         for col in [
-            "SalesTarget",
-            "SalesActual",
-            "SalesPercent",
-            "NOBTarget",
-            "NOBActual",
-            "NOBPercent",
-            "ABVTarget",
-            "ABVActual",
-            "ABVPercent",
+            "SalesTarget","SalesActual","SalesPercent",
+            "NOBTarget","NOBActual","NOBPercent",
+            "ABVTarget","ABVActual","ABVPercent",
         ]:
             if col in d.columns:
                 d[col] = _parse_numeric(d[col])
@@ -289,7 +282,7 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool 
             )
         )
         if daily_target is not None:
-            d_target = daily_target[daily_target["BranchName"] == br]
+            d_target = daily_target[daily_actual["BranchName"] == br]
             fig.add_trace(
                 go.Scatter(
                     x=d_target["Date"],
@@ -392,22 +385,57 @@ def render_branch_cards(bp: pd.DataFrame):
                 )
 
 
-def render_sidebar_snapshot(ph: st.delta_generator.DeltaGenerator, df_for_snapshot: pd.DataFrame):
-    """Render the 'Today's Snapshot' card into the given placeholder using the FINAL filtered df."""
-    snap = calc_kpis(df_for_snapshot)
-    ph.markdown(
-        f"""
-        <div class="sb-card">
-          <div>💰 <b>Sales:</b> SAR {snap.get('total_sales_actual',0):,.0f}</div>
-          <div>📊 <b>Variance:</b> {snap.get('overall_sales_percent',0)-100:+.1f}%</div>
-          <div>🛍️ <b>Baskets:</b> {snap.get('total_nob_actual',0):,.0f}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
+    st.markdown("### 🏆 Overall Performance")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("💰 Total Sales", f"SAR {k.get('total_sales_actual',0):,.0f}", delta=f"vs Target: {k.get('overall_sales_percent',0):.1f}%")
+    variance_color = "normal" if k.get("total_sales_variance", 0) >= 0 else "inverse"
+    c2.metric("📊 Sales Variance", f"SAR {k.get('total_sales_variance',0):,.0f}", delta=f"{k.get('overall_sales_percent',0)-100:+.1f}%", delta_color=variance_color)
+    nob_color = "normal" if k.get("overall_nob_percent", 0) >= config.TARGETS['nob_achievement'] else "inverse"
+    c3.metric("🛍️ Total Baskets", f"{k.get('total_nob_actual',0):,.0f}", delta=f"Achievement: {k.get('overall_nob_percent',0):.1f}%", delta_color=nob_color)
+    abv_color = "normal" if k.get("overall_abv_percent", 0) >= config.TARGETS['abv_achievement'] else "inverse"
+    c4.metric("💎 Avg Basket Value", f"SAR {k.get('avg_abv_actual',0):,.2f}", delta=f"vs Target: {k.get('overall_abv_percent',0):.1f}%")
+    score_color = "normal" if k.get("performance_score", 0) >= 80 else "off"
+    c5.metric("⭐ Performance Score", f"{k.get('performance_score',0):.0f}/100", delta="Weighted Score", delta_color=score_color)
+
+    if "branch_performance" in k and not k["branch_performance"].empty:
+        render_branch_cards(k["branch_performance"])
+
+    if "branch_performance" in k and not k["branch_performance"].empty:
+        st.markdown("### 📊 Comparison Table")
+        bp = k["branch_performance"].copy()
+        df_table = (
+            bp[["SalesPercent", "NOBPercent", "ABVPercent", "SalesActual", "SalesTarget"]]
+            .rename(
+                columns={
+                    "SalesPercent": "Sales %",
+                    "NOBPercent": "NOB %",
+                    "ABVPercent": "ABV %",
+                    "SalesActual": "Sales (Actual)",
+                    "SalesTarget": "Sales (Target)",
+                }
+            )
+            .round(1)
+        )
+        st.dataframe(
+            df_table.style.format(
+                {
+                    "Sales %": "{:,.1f}",
+                    "NOB %": "{:,.1f}",
+                    "ABV %": "{:,.1f}",
+                    "Sales (Actual)": "{:,.0f}",
+                    "Sales (Target)": "{:,.0f}",
+                }
+            ),
+            use_container_width=True,
+        )
+
+        st.markdown("### 📉 Branch Performance Comparison")
+        fig_cmp = _branch_comparison_chart(bp)
+        st.plotly_chart(fig_cmp, use_container_width=True, config={"displayModeBar": False}, key="branch_perf_chart")
 
 
-# -------- Branch filter via toggle buttons (kept same on main page) --------
+# -------- Branch filter via toggle buttons --------
 def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> List[str]:
     if "BranchName" not in df.columns:
         return []
@@ -448,7 +476,7 @@ def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> L
 def main():
     apply_css()
 
-    # Load data first
+    # Load data
     sheets_map = load_workbook_from_gsheet(config.DEFAULT_PUBLISHED_URL)
     if not sheets_map:
         st.warning("No non-empty sheets found.")
@@ -476,7 +504,7 @@ def main():
     if "end_date" not in st.session_state:
         st.session_state.end_date = dmax_sb
 
-    # -------- Sidebar (Actions, Quick Range, Custom Date) + Snapshot placeholder --------
+    # Sidebar
     with st.sidebar:
         st.markdown('<div class="sb-title">📊 <span>AL KHAIR DASHBOARD</span></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-subtle">Filters affect all tabs.</div>', unsafe_allow_html=True)
@@ -522,13 +550,27 @@ def main():
 
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
 
-        # Snapshot placeholder (we will fill it later AFTER final filtering)
+        # Snapshot
+        df_snap = df_for_bounds.copy()
+        if "Date" in df_snap.columns and df_snap["Date"].notna().any():
+            mask_snap = (df_snap["Date"].dt.date >= st.session_state.start_date) & (df_snap["Date"].dt.date <= st.session_state.end_date)
+            df_snap = df_snap.loc[mask_snap]
+        snap = calc_kpis(df_snap)
         st.markdown('<div class="sb-section">Today\'s Snapshot</div>', unsafe_allow_html=True)
-        snapshot_ph = st.empty()  # <-- placeholder to update later
+        st.markdown(
+            f"""
+            <div class="sb-card">
+              <div>💰 <b>Sales:</b> SAR {snap.get('total_sales_actual',0):,.0f}</div>
+              <div>📊 <b>Variance:</b> {snap.get('overall_sales_percent',0)-100:+.1f}%</div>
+              <div>🛍️ <b>Baskets:</b> {snap.get('total_nob_actual',0):,.0f}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         st.markdown('<div class="sb-foot">UI preview • v2.0</div>', unsafe_allow_html=True)
 
-    # ------- Main header -------
+    # Header
     st.markdown(f"<div class='title'>📊 {config.PAGE_TITLE}</div>", unsafe_allow_html=True)
     date_span = ""
     if "Date" in df_all.columns and df_all["Date"].notna().any():
@@ -538,7 +580,7 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # ===== 📱 Mobile filter drawer (visible only on phones via CSS) =====
+    # Mobile filter drawer
     st.markdown('<div class="mobile-only">', unsafe_allow_html=True)
     with st.expander("📱 Filters", expanded=False):
         preset_m = st.radio(
@@ -572,7 +614,7 @@ def main():
             st.session_state.start_date, st.session_state.end_date = dmin_all, dmax_all
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Apply branch filter (main page toggles as before)
+    # Branch filter
     df = df_all.copy()
     if "BranchName" in df.columns:
         prev_sel = tuple(st.session_state.get("selected_branches", []))
@@ -586,7 +628,7 @@ def main():
             st.warning("No rows after branch filter.")
             st.stop()
 
-    # --- Date filter (FINALIZE DATES) ---
+    # Date filter
     if "Date" in df.columns and df["Date"].notna().any():
         dmin = df["Date"].min().date()
         dmax = df["Date"].max().date()
@@ -598,9 +640,12 @@ def main():
 
         s = st.session_state.start_date
         e = st.session_state.end_date
-        if s < dmin or s > dmax: s = dmin
-        if e > dmax or e < dmin: e = dmax
-        if s > e: s, e = dmin, dmax
+        if s < dmin or s > dmax:
+            s = dmin
+        if e > dmax or e < dmin:
+            e = dmax
+        if s > e:
+            s, e = dmin, dmax
         st.session_state.start_date, st.session_state.end_date = s, e
 
         c1, c2, _ = st.columns([2, 2, 6])
@@ -610,19 +655,15 @@ def main():
             end_d = st.date_input("End Date", value=st.session_state.end_date, min_value=dmin, max_value=dmax, key="date_end")
 
         st.session_state.start_date = max(dmin, min(start_d, dmax))
-        st.session_state.end_date   = max(dmin, min(end_d, dmax))
+        st.session_state.end_date = max(dmin, min(end_d, dmax))
         if st.session_state.start_date > st.session_state.end_date:
             st.session_state.start_date, st.session_state.end_date = dmin, dmax
 
-        # Apply FINAL mask for everything below (KPIs, charts AND the snapshot)
         mask = (df["Date"].dt.date >= st.session_state.start_date) & (df["Date"].dt.date <= st.session_state.end_date)
         df = df.loc[mask].copy()
         if df.empty:
             st.warning("No rows in selected date range.")
             st.stop()
-
-    # >>> NOW that df is fully filtered, update the sidebar snapshot placeholder <<<
-    render_sidebar_snapshot(snapshot_ph, df)
 
     # KPIs + Quick insights
     k = calc_kpis(df)
@@ -645,6 +686,7 @@ def main():
 
     # Tabs
     t1, t2, t3 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "📥 Export"])
+
     with t1:
         render_overview(df, k)
 
@@ -663,14 +705,20 @@ def main():
             f = df.copy()
 
         with mtab1:
-            st.plotly_chart(_metric_area(f, "SalesActual", "Daily Sales (Actual vs Target)"),
-                            use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(
+                _metric_area(f, "SalesActual", "Daily Sales (Actual vs Target)"),
+                use_container_width=True, config={"displayModeBar": False}, key="trend_sales_chart"
+            )
         with mtab2:
-            st.plotly_chart(_metric_area(f, "NOBActual", "Number of Baskets (Actual vs Target)"),
-                            use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(
+                _metric_area(f, "NOBActual", "Number of Baskets (Actual vs Target)"),
+                use_container_width=True, config={"displayModeBar": False}, key="trend_nob_chart"
+            )
         with mtab3:
-            st.plotly_chart(_metric_area(f, "ABVActual", "Average Basket Value (Actual vs Target)"),
-                            use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(
+                _metric_area(f, "ABVActual", "Average Basket Value (Actual vs Target)"),
+                use_container_width=True, config={"displayModeBar": False}, key="trend_abv_chart"
+            )
 
     with t3:
         if df.empty:
@@ -697,8 +745,14 @@ def main():
             )
 
 
+# =========================================
+# ENTRYPOINT (debug-friendly)
+# =========================================
 if __name__ == "__main__":
+    # Show the actual error and traceback if something goes wrong.
     try:
         main()
-    except Exception:
-        st.error("❌ Application Error. Please adjust filters or refresh.")
+    except Exception as e:
+        import traceback
+        st.error(f"❌ Application Error: {e}")
+        st.text(traceback.format_exc())
