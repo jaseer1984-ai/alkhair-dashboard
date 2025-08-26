@@ -17,10 +17,16 @@ import plotly.graph_objects as go
 class Config:
     PAGE_TITLE = "Al Khair Business Performance"
     LAYOUT = "wide"
-    DEFAULT_PUBLISHED_URL = (
-        # You can leave output=csv; the loader now handles it or upgrades it to xlsx.
-        "https://docs.google.com/spreadsheets/d/e/2PACX-1vRYrhOc1N4ipUj55mwiXSLC_Qsw0efmAzKhfhnWtVOV2tP9gLEs2VO3I91pF9kdgg/pub?output=csv"
-    )
+
+    # --- ONE LINK PER BRANCH (use your /edit?gid=... links; app will convert) ---
+    BRANCH_LINKS: Dict[str, str] = {
+        "Al khair - 102": "https://docs.google.com/spreadsheets/d/1Yw20XswX7DE3tjz4oaz7cW4fc4hDYakD/edit?gid=579279241#gid=579279241",
+        "Noora - 104":   "https://docs.google.com/spreadsheets/d/1Yw20XswX7DE3tjz4oaz7cW4fc4hDYakD/edit?gid=1582179805#gid=1582179805",
+        "Hamra - 109":   "https://docs.google.com/spreadsheets/d/1Yw20XswX7DE3tjz4oaz7cW4fc4hDYakD/edit?gid=1475015429#gid=1475015429",
+        "Magnus - 107":  "https://docs.google.com/spreadsheets/d/1Yw20XswX7DE3tjz4oaz7cW4fc4hDYakD/edit?gid=959047977#gid=959047977",
+    }
+
+    # Display names, codes, colors for cards (optional)
     BRANCHES = {
         "Al khair - 102": {"name": "Al Khair", "code": "102", "color": "#3b82f6"},
         "Noora - 104": {"name": "Noora", "code": "104", "color": "#10b981"},
@@ -91,13 +97,11 @@ def apply_css():
           .title { font-size: 1.3rem; }
           .subtitle { font-size: .85rem; }
           [data-testid="metric-container"] { padding:12px!important; }
-          /* Hide the sidebar on phones (still available via hamburger menu) */
           [data-testid="stSidebar"] { display: none; }
-          /* show mobile widgets */
           .mobile-only { display: block !important; }
           .desktop-only { display: none !important; }
         }
-        .mobile-only { display: none; }  /* hidden by default on desktop */
+        .mobile-only { display: none; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -107,13 +111,26 @@ def apply_css():
 # =========================================
 # LOADERS / HELPERS
 # =========================================
-def _normalize_gsheet_url(url: str) -> str:
-    """Normalize common Google Sheets publish URLs toward xlsx export when possible."""
+def _to_published_csv(url: str) -> str:
+    """
+    Convert common Google Sheets editor URLs (/edit?gid=...) to a published CSV:
+      /pub?gid=<gid>&single=true&output=csv
+    Also accepts already-published links.
+    """
     u = url.strip()
-    # pubhtml → xlsx
-    u = re.sub(r"/pubhtml(\?.*)?$", "/pub?output=xlsx", u)
-    # output=csv → output=xlsx (keeps same base, supports multi-sheet export)
-    u = re.sub(r"output=csv(\b|$)", "output=xlsx", u)
+    # Already published as CSV/xlsx? return as-is
+    if re.search(r"/pub\?(.*\boutput=(csv|xlsx))", u):
+        return u
+
+    # Extract the spreadsheet id and gid
+    m_id = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", u)
+    m_gid = re.search(r"[?&#]gid=([0-9]+)", u)
+    if m_id and m_gid:
+        sid = m_id.group(1)
+        gid = m_gid.group(1)
+        return f"https://docs.google.com/spreadsheets/d/{sid}/pub?gid={gid}&single=true&output=csv"
+
+    # Fallback: leave untouched
     return u
 
 
@@ -125,62 +142,36 @@ def _parse_numeric(s: pd.Series) -> pd.Series:
 
 
 @st.cache_data(show_spinner=False)
-def load_workbook_from_gsheet(published_url: str) -> Dict[str, pd.DataFrame]:
+def load_workbook_from_multiple(branch_links: Dict[str, str]) -> Dict[str, pd.DataFrame]:
     """
-    Robust loader:
-      1) Try xlsx export (multi-sheet) — preferred
-      2) If that fails, try CSV export for a single sheet
+    Load each branch from its own published link (CSV or XLSX).
+    Returns a dict: {branch_label: dataframe}
     """
-    raw_url = (published_url or config.DEFAULT_PUBLISHED_URL).strip()
-    try_order = []
-
-    # First try xlsx (normalize common variants)
-    try_order.append(_normalize_gsheet_url(raw_url))
-
-    # If user really wants CSV, try the raw URL as-is (single sheet)
-    if "output=csv" in raw_url:
-        try_order.append(raw_url)
-
-    last_err: Optional[Exception] = None
-    for url in try_order:
+    sheets: Dict[str, pd.DataFrame] = {}
+    for branch, raw in branch_links.items():
+        url = _to_published_csv(raw)
         try:
             r = requests.get(url, timeout=60)
             r.raise_for_status()
-            content = r.content
+            content = io.BytesIO(r.content)
 
-            # Heuristic: try Excel first
+            # Try CSV first (since we publish single sheet)
+            df: Optional[pd.DataFrame] = None
             try:
-                xls = pd.ExcelFile(io.BytesIO(content))
-                sheets: Dict[str, pd.DataFrame] = {}
-                for sn in xls.sheet_names:
-                    df = xls.parse(sn)
-                    df = df.dropna(how="all").dropna(axis=1, how="all")
-                    if not df.empty:
-                        sheets[sn] = df
-                if sheets:
-                    return sheets
-                else:
-                    # If workbook parsed but every sheet empty, continue to next method/URL
-                    last_err = ValueError("Workbook parsed but all sheets are empty.")
+                df = pd.read_csv(content)
             except Exception:
-                # Not an Excel file (or corrupt) → try CSV
-                try:
-                    df = pd.read_csv(io.BytesIO(content))
-                    df = df.dropna(how="all").dropna(axis=1, how="all")
-                    if not df.empty:
-                        return {"Sheet1": df}
-                    last_err = ValueError("CSV parsed but is empty.")
-                except Exception as e_csv:
-                    last_err = e_csv
-                    continue
-        except Exception as e_req:
-            last_err = e_req
-            continue
+                # Reset buffer and try Excel
+                content.seek(0)
+                df = pd.read_excel(content)
 
-    # If we reached here, all attempts failed
-    err_msg = f"Failed to load Google Sheet. Last error: {type(last_err).__name__}: {last_err}"
-    st.error(err_msg)
-    return {}  # let caller handle no sheets
+            df = df.dropna(how="all").dropna(axis=1, how="all")
+            if not df.empty:
+                sheets[branch] = df
+            else:
+                st.warning(f"⚠️ {branch}: sheet is empty after loading.")
+        except Exception as e:
+            st.warning(f"⚠️ Failed to load {branch}: {e}")
+    return sheets
 
 
 def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -224,26 +215,25 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
             maybe = [c for c in d.columns if "date" in c.lower()]
             if maybe:
                 d.rename(columns={maybe[0]: "Date"}, inplace=True)
+
         d["Branch"] = sheet_name
         meta = config.BRANCHES.get(sheet_name, {})
         d["BranchName"] = meta.get("name", sheet_name)
         d["BranchCode"] = meta.get("code", "000")
+
         if "Date" in d.columns:
             d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
+
         for col in [
-            "SalesTarget",
-            "SalesActual",
-            "SalesPercent",
-            "NOBTarget",
-            "NOBActual",
-            "NOBPercent",
-            "ABVTarget",
-            "ABVActual",
-            "ABVPercent",
+            "SalesTarget", "SalesActual", "SalesPercent",
+            "NOBTarget", "NOBActual", "NOBPercent",
+            "ABVTarget", "ABVActual", "ABVPercent",
         ]:
             if col in d.columns:
                 d[col] = _parse_numeric(d[col])
+
         combined.append(d)
+
     return pd.concat(combined, ignore_index=True) if combined else pd.DataFrame()
 
 
@@ -288,18 +278,18 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
         )
 
     if "Date" in df.columns and df["Date"].notna().any():
-        k["date_range"] = {"start": df["Date"].min(), "end": df["Date"].max(), "days": int(df["Date"].dt.date.nunique())}
+        k["date_range"] = {
+            "start": df["Date"].min(), "end": df["Date"].max(),
+            "days": int(df["Date"].dt.date.nunique())
+        }
 
     score = w = 0.0
     if k.get("overall_sales_percent", 0) > 0:
-        score += min(k["overall_sales_percent"] / 100, 1.2) * 40
-        w += 40
+        score += min(k["overall_sales_percent"] / 100, 1.2) * 40; w += 40
     if k.get("overall_nob_percent", 0) > 0:
-        score += min(k["overall_nob_percent"] / 100, 1.2) * 35
-        w += 35
+        score += min(k["overall_nob_percent"] / 100, 1.2) * 35; w += 35
     if k.get("overall_abv_percent", 0) > 0:
-        score += min(k["overall_abv_percent"] / 100, 1.2) * 25
-        w += 25
+        score += min(k["overall_abv_percent"] / 100, 1.2) * 25; w += 25
     k["performance_score"] = (score / w * 100) if w > 0 else 0.0
     return k
 
@@ -491,11 +481,9 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
         st.plotly_chart(fig_cmp, use_container_width=True, config={"displayModeBar": False})
 
 
-# -------- Branch filter via toggle buttons (kept same on main page) --------
 def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> List[str]:
     if "BranchName" not in df.columns:
         return []
-
     all_branches = sorted([b for b in df["BranchName"].dropna().unique()])
     if "selected_branches" not in st.session_state:
         st.session_state.selected_branches = all_branches.copy()
@@ -505,11 +493,9 @@ def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> L
     with col_a:
         c1, c2 = st.columns(2)
         if c1.button("Select all"):
-            st.session_state.selected_branches = all_branches.copy()
-            st.rerun()
+            st.session_state.selected_branches = all_branches.copy(); st.rerun()
         if c2.button("Clear"):
-            st.session_state.selected_branches = []
-            st.rerun()
+            st.session_state.selected_branches = []; st.rerun()
 
     with col_b:
         btn_cols = st.columns(len(all_branches)) if all_branches else []
@@ -522,7 +508,6 @@ def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> L
                 else:
                     st.session_state.selected_branches.append(b)
                 st.rerun()
-
     return st.session_state.selected_branches
 
 
@@ -532,10 +517,10 @@ def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> L
 def main():
     apply_css()
 
-    # Load data first
-    sheets_map = load_workbook_from_gsheet(config.DEFAULT_PUBLISHED_URL)
+    # Load data (one link per branch)
+    sheets_map = load_workbook_from_multiple(config.BRANCH_LINKS)
     if not sheets_map:
-        st.warning("No non-empty sheets found. Check your published link/permissions or sheet content.")
+        st.warning("No non-empty sheets found. Check publish settings or links.")
         st.stop()
 
     df_all = process_branch_data(sheets_map)
@@ -543,7 +528,7 @@ def main():
         st.error("Could not process data. Check column names and sheet structure.")
         st.stop()
 
-    # Bounds for sidebar presets (based on current branches, initially all)
+    # Bounds for sidebar presets (based on selected branches)
     all_branches = sorted(df_all["BranchName"].dropna().unique()) if "BranchName" in df_all else []
     if "selected_branches" not in st.session_state:
         st.session_state.selected_branches = list(all_branches)
@@ -560,7 +545,7 @@ def main():
     if "end_date" not in st.session_state:
         st.session_state.end_date = dmax_sb
 
-    # -------- Sidebar (Actions, Quick Range, Custom Date, Snapshot) --------
+    # -------- Sidebar --------
     with st.sidebar:
         st.markdown('<div class="sb-title">📊 <span>AL KHAIR DASHBOARD</span></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-subtle">Filters affect all tabs.</div>', unsafe_allow_html=True)
@@ -568,15 +553,10 @@ def main():
         st.markdown('<div class="sb-section">Actions</div>', unsafe_allow_html=True)
         cols = st.columns(2)
         if cols[0].button("🔄 Refresh Data", use_container_width=True):
-            load_workbook_from_gsheet.clear()
-            st.session_state.pop("start_date", None)
-            st.session_state.pop("end_date", None)
-            st.rerun()
+            load_workbook_from_multiple.clear(); st.rerun()
         if cols[1].button("🧹 Reset Filters", use_container_width=True):
             st.session_state.selected_branches = list(all_branches)
-            st.session_state.start_date = dmin_sb
-            st.session_state.end_date = dmax_sb
-            st.rerun()
+            st.session_state.start_date = dmin_sb; st.session_state.end_date = dmax_sb; st.rerun()
 
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
 
@@ -636,15 +616,13 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # ===== 📱 Mobile filter drawer (visible only on phones via CSS) =====
+    # ===== Mobile filter drawer =====
     st.markdown('<div class="mobile-only">', unsafe_allow_html=True)
     with st.expander("📱 Filters", expanded=False):
         preset_m = st.radio(
             "Quick range",
             ["Last 7d", "Last 30d", "This Month", "YTD", "All Time"],
-            index=1,
-            horizontal=True,
-            key="m_quick_range",
+            index=1, horizontal=True, key="m_quick_range",
         )
         dmin_all = df_all["Date"].min().date() if "Date" in df_all else datetime.today().date()
         dmax_all = df_all["Date"].max().date() if "Date" in df_all else datetime.today().date()
@@ -670,7 +648,7 @@ def main():
             st.session_state.start_date, st.session_state.end_date = dmin_all, dmax_all
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Apply branch filter (main page toggles as before)
+    # Apply branch filter
     df = df_all.copy()
     if "BranchName" in df.columns:
         prev_sel = tuple(st.session_state.get("selected_branches", []))
@@ -678,30 +656,20 @@ def main():
         if selected:
             df = df[df["BranchName"].isin(selected)].copy()
         if tuple(selected) != prev_sel:
-            st.session_state.pop("start_date", None)
-            st.session_state.pop("end_date", None)
+            st.session_state.pop("start_date", None); st.session_state.pop("end_date", None)
         if df.empty:
-            st.warning("No rows after branch filter.")
-            st.stop()
+            st.warning("No rows after branch filter."); st.stop()
 
-    # --- Date filter (unchanged) ---
+    # --- Date filter ---
     if "Date" in df.columns and df["Date"].notna().any():
-        dmin = df["Date"].min().date()
-        dmax = df["Date"].max().date()
+        dmin = df["Date"].min().date(); dmax = df["Date"].max().date()
+        if "start_date" not in st.session_state: st.session_state.start_date = dmin
+        if "end_date" not in st.session_state:   st.session_state.end_date = dmax
 
-        if "start_date" not in st.session_state:
-            st.session_state.start_date = dmin
-        if "end_date" not in st.session_state:
-            st.session_state.end_date = dmax
-
-        s = st.session_state.start_date
-        e = st.session_state.end_date
-        if s < dmin or s > dmax:
-            s = dmin
-        if e > dmax or e < dmin:
-            e = dmax
-        if s > e:
-            s, e = dmin, dmax
+        s = st.session_state.start_date; e = st.session_state.end_date
+        if s < dmin or s > dmax: s = dmin
+        if e > dmax or e < dmin: e = dmax
+        if s > e: s, e = dmin, dmax
         st.session_state.start_date, st.session_state.end_date = s, e
 
         c1, c2, _ = st.columns([2, 2, 6])
@@ -718,8 +686,7 @@ def main():
         mask = (df["Date"].dt.date >= st.session_state.start_date) & (df["Date"].dt.date <= st.session_state.end_date)
         df = df.loc[mask].copy()
         if df.empty:
-            st.warning("No rows in selected date range.")
-            st.stop()
+            st.warning("No rows in selected date range."); st.stop()
 
     # KPIs + Quick insights
     k = calc_kpis(df)
@@ -730,13 +697,11 @@ def main():
             insights.append(f"🥇 Best Sales %: {bp['SalesPercent'].idxmax()} — {bp['SalesPercent'].max():.1f}%")
             insights.append(f"🔻 Lowest Sales %: {bp['SalesPercent'].idxmin()} — {bp['SalesPercent'].min():.1f}%")
             below = bp[bp["SalesPercent"] < config.TARGETS["sales_achievement"]].index.tolist()
-            if below:
-                insights.append("⚠️ Below 95% target: " + ", ".join(below))
+            if below: insights.append("⚠️ Below 95% target: " + ", ".join(below))
         if k.get("total_sales_variance", 0) < 0:
             insights.append(f"🟥 Overall variance negative by SAR {abs(k['total_sales_variance']):,.0f}")
         if insights:
-            for it in insights:
-                st.markdown("- " + it)
+            for it in insights: st.markdown("- " + it)
         else:
             st.write("All metrics look healthy for the current selection.")
 
