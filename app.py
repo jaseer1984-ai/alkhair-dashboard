@@ -28,8 +28,8 @@ class Config:
         "Magnus - 107": {"name": "Magnus", "code": "107", "color": "#8b5cf6"},
     }
     TARGETS = {"sales_achievement": 95.0, "nob_achievement": 90.0, "abv_achievement": 90.0}
-    SHOW_SUBTITLE = False  # toggle subtitle under the title
-    CARDS_PER_ROW = 3      # <<< fixed 3 cards per row
+    SHOW_SUBTITLE = False
+    CARDS_PER_ROW = 3   # 3 cards per row
 
 
 config = Config()
@@ -57,28 +57,21 @@ def apply_css():
         .hero-emoji { font-size:1.15em; }
         .subtitle { color:#6b7280; font-size:.95rem; margin-bottom:1rem; text-align:center; }
 
-        /* --- Metric tiles: centered + smaller numbers --- */
+        /* Metric tiles: centered + smaller numbers */
         [data-testid="metric-container"]{
           background:#fff!important;border-radius:16px!important;border:1px solid rgba(0,0,0,.06)!important;
           padding:16px!important;text-align:center!important;
         }
-        [data-testid="stMetricValue"]{
-          font-size:clamp(16px,2.2vw,22px)!important;
-          line-height:1.2!important;
-        }
+        [data-testid="stMetricValue"]{ font-size:clamp(16px,2.2vw,22px)!important; line-height:1.2!important; }
         [data-testid="stMetricLabel"]{ font-size:.85rem!important;color:#6b7280!important; }
 
         .card { background:#fcfcfc; border:1px solid #f1f5f9; border-radius:16px; padding:16px; height:100%; }
-
-        /* Branch card: equal-width metric columns */
         .branch-card { display:flex; flex-direction:column; height:100%; position:relative; }
+
+        /* aligned figures inside cards */
         .branch-metrics{
-          display:grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 6px 12px;
-          margin-top: 10px;
-          text-align: center;
-          align-items: center;
+          display:grid; grid-template-columns: repeat(3, 1fr);
+          gap: 6px 12px; margin-top: 10px; text-align: center; align-items: center;
         }
         .branch-metrics .label{ font-size:.80rem; color:#64748b; }
         .branch-metrics .value{ font-weight:700; }
@@ -89,14 +82,25 @@ def apply_css():
         .pill.warn      { background:#fffbeb; color:#d97706; }
         .pill.danger    { background:#fef2f2; color:#dc2626; }
 
-        /* Tabs */
-        .stTabs [data-baseweb="tab-list"] { gap: 8px; border-bottom: none; }
-        .stTabs [data-baseweb="tab"] {
-          border-radius: 10px 10px 0 0 !important; padding: 10px 18px !important; font-weight: 700 !important;
-          background:#f3f4f6!important; color:#374151!important; border:1px solid #e5e7eb!important; border-bottom:none!important;
+        /* ---- Tabs (high-contrast & readable) ---- */
+        .stTabs [data-baseweb="tab-list"]{ gap:8px; border-bottom:none; }
+        .stTabs [data-baseweb="tab"]{
+          position:relative; border-radius:10px 10px 0 0 !important; padding:10px 18px !important;
+          font-weight:700 !important; background:#f3f4f6 !important; color:#1f2937 !important;
+          border:1px solid #e5e7eb !important; border-bottom:none !important;
         }
-        .stTabs [data-baseweb="tab"]:hover { background:#e5e7eb!important; }
-        .stTabs [aria-selected="true"] { color:#fff!important; box-shadow:0 4px 12px rgba(0,0,0,.15); }
+        .stTabs [data-baseweb="tab"] p{ color:inherit !important; }
+        .stTabs [data-baseweb="tab"]:hover{ background:#e5e7eb!important; }
+        .stTabs [aria-selected="true"]{
+          background:#ffffff !important; color:#111827 !important; border-color:#c7d2fe !important;
+          box-shadow:0 4px 12px rgba(0,0,0,.08) !important;
+        }
+        .stTabs [aria-selected="true"] p{ color:#111827 !important; }
+        .stTabs [aria-selected="true"]::after{
+          content:""; position:absolute; left:8px; right:8px; bottom:-1px;
+          height:3px; border-radius:999px;
+          background:linear-gradient(90deg,#ef4444,#f97316,#22c55e,#3b82f6);
+        }
 
         /* Sidebar */
         [data-testid="stSidebar"]{ background:#f7f9fc; border-right:1px solid #e5e7eb; min-width:280px; max-width:320px; }
@@ -109,11 +113,10 @@ def apply_css():
         /* DataFrame: center headers only */
         .stDataFrame table thead tr th { text-align: center !important; }
 
-        /* Responsive fixes: allow rows to wrap to avoid hidden content */
-        [data-testid="stHorizontalBlock"] { display:flex; flex-wrap: wrap; gap: 1rem; }
-        [data-testid="stHorizontalBlock"] > div { min-width: 260px; flex: 1 1 260px; }
-
-        [data-testid="stPlotlyChart"], [data-testid="stDataFrame"] { overflow:auto; }
+        /* Responsive fixes */
+        [data-testid="stHorizontalBlock"]{ display:flex; flex-wrap:wrap; gap:1rem; }
+        [data-testid="stHorizontalBlock"]>div{ min-width:260px; flex:1 1 260px; }
+        [data-testid="stPlotlyChart"], [data-testid="stDataFrame"]{ overflow:auto; }
         .js-plotly-plot, .plotly, .js-plotly-plot .plotly, .js-plotly-plot .main-svg { max-width:100%!important; }
 
         @media (max-width: 820px){
@@ -518,16 +521,25 @@ def main():
         else:
             dmin_sb = dmax_sb = datetime.today().date()
 
-        if "start_date" not in st.session_state: st.session_state.start_date = dmin_sb
-        if "end_date"   not in st.session_state: st.session_state.end_date   = dmax_sb
+        # --- CLAMP cached dates to new bounds BEFORE rendering widgets (fix for your error) ---
+        sd_val = st.session_state.get("start_date", dmin_sb)
+        ed_val = st.session_state.get("end_date",   dmax_sb)
+        # clamp to [dmin_sb, dmax_sb]
+        sd_val = min(max(sd_val, dmin_sb), dmax_sb)
+        ed_val = min(max(ed_val, dmin_sb), dmax_sb)
+        if sd_val > ed_val:
+            sd_val, ed_val = dmin_sb, dmax_sb  # safe reset when range collapses
 
         st.markdown('<div class="sb-section">Custom Date</div>', unsafe_allow_html=True)
-        _sd = st.date_input("Start:", value=st.session_state.start_date, min_value=dmin_sb, max_value=dmax_sb, key="sb_sd")
-        _ed = st.date_input("End:",   value=st.session_state.end_date,   min_value=dmin_sb, max_value=dmax_sb, key="sb_ed")
-        st.session_state.start_date = max(dmin_sb, min(_sd, dmax_sb))
-        st.session_state.end_date   = max(dmin_sb, min(_ed, dmax_sb))
+        _sd = st.date_input("Start:", value=sd_val, min_value=dmin_sb, max_value=dmax_sb, key="sb_sd")
+        _ed = st.date_input("End:",   value=ed_val, min_value=dmin_sb, max_value=dmax_sb, key="sb_ed")
+
+        # store clamped values back
+        st.session_state.start_date = min(max(_sd, dmin_sb), dmax_sb)
+        st.session_state.end_date   = min(max(_ed, dmin_sb), dmax_sb)
         if st.session_state.start_date > st.session_state.end_date:
             st.session_state.start_date, st.session_state.end_date = dmin_sb, dmax_sb
+        # ---------------------------------------------------------------------
 
     # Hero header
     st.markdown(
