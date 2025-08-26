@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import re
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -17,8 +17,9 @@ import plotly.graph_objects as go
 class Config:
     PAGE_TITLE = "Al Khair Business Performance"
     LAYOUT = "wide"
+    # ⚠️ Set to your direct spreadsheet URL (NOT pubhtml)
     DEFAULT_PUBLISHED_URL = (
-        "https://docs.google.com/spreadsheets/d/e/2PACX-1vQG7boLWl2bNLCPR05NXv6EFpPPcFfXsiXPQ7rAGYr3q8Nkc2Ijg8BqEwVofcMLSg/pubhtml"
+        "https://docs.google.com/spreadsheets/d/1sYd2tCx_u3vh41ecdQNPVAOOn7qbu_Ns/edit?gid=1185316772#gid=1185316772"
     )
     BRANCHES = {
         "Al khair - 102": {"name": "Al Khair", "code": "102", "color": "#3b82f6"},
@@ -46,7 +47,6 @@ def apply_css():
         .title { font-weight:900; font-size:1.6rem; margin-bottom:.25rem; }
         .subtitle { color:#6b7280; font-size:.95rem; margin-bottom:1rem; }
 
-        /* Metric tiles */
         [data-testid="metric-container"] {
             background:#fff !important; border-radius:16px !important; border:1px solid rgba(0,0,0,.06)!important; padding:18px!important;
         }
@@ -58,7 +58,6 @@ def apply_css():
         .pill.warn      { background:#fffbeb; color:#d97706; }
         .pill.danger    { background:#fef2f2; color:#dc2626; }
 
-        /* Tabs */
         .stTabs [data-baseweb="tab-list"] { gap: 8px; border-bottom: none; }
         .stTabs [data-baseweb="tab"] {
           border-radius: 10px 10px 0 0 !important;
@@ -68,12 +67,11 @@ def apply_css():
         }
         .stTabs [data-baseweb="tab"]:hover { background:#e5e7eb !important; }
         .stTabs [aria-selected="true"] { color: #fff !important; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-        .stTabs [data-baseweb="tab"]:nth-child(1)[aria-selected="true"] { background: linear-gradient(135deg,#ef4444 0%,#f87171 100%) !important; border-color:#f87171 !important; }
-        .stTabs [data-baseweb="tab"]:nth-child(2)[aria-selected="true"] { background: linear-gradient(135deg,#3b82f6 0%,#60a5fa 100%) !important; border-color:#60a5fa !important; }
-        .stTabs [data-baseweb="tab"]:nth-child(3)[aria-selected="true"] { background: linear-gradient(135deg,#8b5cf6 0%,#a78bfa 100%) !important; border-color:#a78bfa !important; }
-        .stTabs [data-baseweb="tab"]:nth-child(4)[aria-selected="true"] { background: linear-gradient(135deg,#10b981 0%,#34d399 100%) !important; border-color:#34d399 !important; }
+        .stTabs [data-baseweb="tab"]:nth-child(1)[aria-selected="true"] { background: linear-gradient(135deg,#ef4444 0%,#f87171 100%) !important; }
+        .stTabs [data-baseweb="tab"]:nth-child(2)[aria-selected="true"] { background: linear-gradient(135deg,#3b82f6 0%,#60a5fa 100%) !important; }
+        .stTabs [data-baseweb="tab"]:nth-child(3)[aria-selected="true"] { background: linear-gradient(135deg,#8b5cf6 0%,#a78bfa 100%) !important; }
+        .stTabs [data-baseweb="tab"]:nth-child(4)[aria-selected="true"] { background: linear-gradient(135deg,#10b981 0%,#34d399 100%) !important; }
 
-        /* Sidebar (desktop look) */
         [data-testid="stSidebar"] {
           background: #f7f9fc; border-right: 1px solid #e5e7eb; min-width: 280px; max-width: 320px;
         }
@@ -85,12 +83,10 @@ def apply_css():
         .sb-hr { height:1px; background:#e5e7eb; margin:12px 0; border-radius:999px; }
         .sb-foot { margin-top:10px; font-size:.75rem; color:#9ca3af; text-align:center; }
 
-        /* ---------- Mobile tweaks ---------- */
         @media (max-width: 680px) {
           .main .block-container { padding: 0.6rem 0.8rem; }
           .title { font-size: 1.3rem; }
           .subtitle { font-size: .85rem; }
-          [data-testid="metric-container"] { padding:12px!important; }
           [data-testid="stSidebar"] { display: none; }
           .mobile-only { display: block !important; }
           .desktop-only { display: none !important; }
@@ -105,39 +101,67 @@ def apply_css():
 # =========================================
 # LOADERS / HELPERS
 # =========================================
-def _pubhtml_to_xlsx(url: str) -> str:
+def _extract_spreadsheet_id(url: str) -> Optional[str]:
+    m = re.search(r"/spreadsheets/d/([^/]+)/", url)
+    return m.group(1) if m else None
+
+
+def _xlsx_export_url(spreadsheet_id: str) -> str:
+    return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=xlsx"
+
+
+def _sheet_list_from_html(url: str) -> List[Tuple[str, int]]:
     """
-    Convert a published 'pubhtml' URL into a best-guess XLSX download URL.
-    Supports both /d/e/ published links and direct /d/{id} links.
+    Fetch the sheet edit page HTML and extract (title, gid) pairs with regex.
+    No html5lib/bs4 needed.
     """
-    u = url.strip()
-    # Case 1: already a direct /d/{id} sheet URL -> use export?format=xlsx
-    m = re.search(r"docs\.google\.com/spreadsheets/d/([^/]+)/", u)
-    if m:
-        sid = m.group(1)
-        return f"https://docs.google.com/spreadsheets/d/{sid}/export?format=xlsx"
-    # Case 2: published /d/e/.../pubhtml links -> classic replacement
-    if "docs.google.com/spreadsheets/d/e/" in u and "/pubhtml" in u:
-        return re.sub(r"/pubhtml(\?.*)?$", "/pub?output=xlsx", u)
-    # Fallback: return original (caller may parse HTML)
-    return u
+    headers = {"User-Agent": "Mozilla/5.0 (Streamlit Loader)"}
+    r = requests.get(url, timeout=60, headers=headers)
+    r.raise_for_status()
+    html = r.text
+
+    pairs: List[Tuple[str, int]] = []
+
+    # Try to find records like: "sheetId":123456789,"title":"Sheet Name"
+    pattern = re.compile(r'"sheetId"\s*:\s*(\d+)\s*,\s*"title"\s*:\s*"([^"]+)"')
+    for m in pattern.finditer(html):
+        gid = int(m.group(1))
+        title = m.group(2)
+        pairs.append((title, gid))
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique_pairs = []
+    for title, gid in pairs:
+        if gid not in seen:
+            seen.add(gid)
+            unique_pairs.append((title, gid))
+    return unique_pairs
+
+
+def _csv_export_url(spreadsheet_id: str, gid: int) -> str:
+    # Per-sheet CSV endpoint
+    return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv&gid={gid}"
 
 
 @st.cache_data(show_spinner=False)
-def load_workbook_from_gsheet(published_url: str) -> Dict[str, pd.DataFrame]:
+def load_workbook_from_gsheet(sheet_url: str) -> Dict[str, pd.DataFrame]:
     """
-    Resilient loader:
-      1) Try XLSX export (requests + ExcelFile)
-      2) If that fails, fetch the pubhtml and parse tables with pandas.read_html
-    Returns a dict of {sheet_name: DataFrame}. Sheet names may be generic when parsed from HTML.
+    Robust loader with NO html5lib dependency:
+      1) Try XLSX export of whole workbook
+      2) If that fails, discover (title, gid) via regex from edit HTML, then
+         fetch each sheet via CSV export endpoint, building a workbook dict.
     """
-    url_in = (published_url or config.DEFAULT_PUBLISHED_URL).strip()
+    url_in = (sheet_url or config.DEFAULT_PUBLISHED_URL).strip()
+    ssid = _extract_spreadsheet_id(url_in)
+    if not ssid:
+        st.error("Invalid Google Sheet URL (missing /d/{id}/).")
+        return {}
 
-    # ---------- Strategy 1: XLSX export ----------
-    xlsx_url = _pubhtml_to_xlsx(url_in)
+    # --- Strategy 1: XLSX whole-workbook export ---
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Streamlit Loader)"}
-        r = requests.get(xlsx_url, timeout=60, headers=headers)
+        r = requests.get(_xlsx_export_url(ssid), timeout=60, headers=headers)
         r.raise_for_status()
         xls = pd.ExcelFile(io.BytesIO(r.content))
         sheets: Dict[str, pd.DataFrame] = {}
@@ -149,36 +173,34 @@ def load_workbook_from_gsheet(published_url: str) -> Dict[str, pd.DataFrame]:
         if sheets:
             return sheets
     except Exception:
-        st.info("XLSX export failed, falling back to HTML parsing…")
+        st.info("XLSX export failed, using CSV-per-sheet fallback…")
 
-    # ---------- Strategy 2: Parse published HTML ----------
+    # --- Strategy 2: Per-sheet CSV fallback (no html parsing libs) ---
     try:
-        headers = {"User-Agent": "Mozilla/5.0 (Streamlit Loader)"}
-        r = requests.get(url_in, timeout=60, headers=headers)
-        r.raise_for_status()
-        html = r.text
-
-        # Try to extract nicer sheet names if present.
-        names = re.findall(r'data-sheets-name="([^"]+)"', html)
-        tables = pd.read_html(html, flavor="bs4")  # returns List[DataFrame]
+        name_gid_list = _sheet_list_from_html(url_in)
+        if not name_gid_list:
+            st.error("Could not discover sheet tabs (names/gids).")
+            return {}
 
         sheets: Dict[str, pd.DataFrame] = {}
-        for i, df in enumerate(tables):
-            df = df.dropna(how="all").dropna(axis=1, how="all")
-            if df.empty:
+        headers = {"User-Agent": "Mozilla/5.0 (Streamlit Loader)"}
+        for title, gid in name_gid_list:
+            try:
+                csv_url = _csv_export_url(ssid, gid)
+                resp = requests.get(csv_url, timeout=60, headers=headers)
+                resp.raise_for_status()
+                df = pd.read_csv(io.StringIO(resp.content.decode("utf-8", errors="ignore")))
+                df = df.dropna(how="all").dropna(axis=1, how="all")
+                if not df.empty:
+                    sheets[title] = df
+            except Exception:
+                # Skip broken tabs; continue with others
                 continue
-            name = names[i] if i < len(names) else f"Sheet{i+1}"
-            # Heuristic: first row as header when columns are 0..n and row 0 looks header-ish
-            if df.shape[0] > 1 and all(isinstance(x, str) for x in df.iloc[0].tolist()):
-                if all(isinstance(c, (int, np.integer)) for c in df.columns):
-                    df.columns = df.iloc[0]
-                    df = df[1:]
-            sheets[name] = df
 
         if sheets:
             return sheets
         else:
-            st.warning("Parsed the HTML but found no non-empty tables.")
+            st.warning("CSV fallback parsed no non-empty sheets.")
             return {}
     except Exception as e:
         st.exception(e)
@@ -300,9 +322,9 @@ def process_liquidity_sheet(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame
 
     date_col = _find_first(raw, ["date"])
     bank_col = _find_first(raw, ["bank", "account"])
-    inflow_col = _find_first(raw, ["inflow", "in"])
-    outflow_col = _find_first(raw, ["outflow", "out"])
-    closing_col = _find_first(raw, ["closing", "balance"])
+    inflow_col = _find_first(raw, ["inflow", "in", "cash in"])
+    outflow_col = _find_first(raw, ["outflow", "out", "cash out"])
+    closing_col = _find_first(raw, ["closing", "balance", "closing balance"])
 
     keep = [c for c in [date_col, bank_col, inflow_col, outflow_col, closing_col] if c is not None]
     df = raw[keep].copy() if keep else pd.DataFrame()
@@ -371,7 +393,6 @@ def liquidity_charts(df: pd.DataFrame, start_date: datetime.date, end_date: date
     if f.empty:
         return figs
 
-    # Closing balance trend
     fig1 = go.Figure()
     if "Closing" in f:
         if "Bank" in f:
@@ -398,7 +419,6 @@ def liquidity_charts(df: pd.DataFrame, start_date: datetime.date, end_date: date
         xaxis_title="Date", yaxis_title="SAR"
     )
 
-    # Inflows vs Outflows
     fig2 = go.Figure()
     if "Inflow" in f or "Outflow" in f:
         daily = f.groupby("Date", as_index=False).agg({
@@ -637,7 +657,7 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
         st.plotly_chart(fig_cmp, use_container_width=True, config={"displayModeBar": False})
 
 
-# -------- Branch filter via toggle buttons (kept same on main page) --------
+# -------- Branch filter buttons --------
 def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> List[str]:
     if "BranchName" not in df.columns:
         return []
@@ -678,13 +698,13 @@ def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> L
 def main():
     apply_css()
 
-    # Load data first (resilient loader)
+    # Load data
     sheets_map = load_workbook_from_gsheet(config.DEFAULT_PUBLISHED_URL)
     if not sheets_map:
         st.warning("No non-empty sheets found.")
         st.stop()
 
-    # Branch data (from configured branch sheets only)
+    # Branch data (only known branches)
     df_all = process_branch_data(sheets_map)
     if df_all.empty:
         st.error("Could not process branch data. Check branch sheet names/columns.")
@@ -693,7 +713,7 @@ def main():
     # Liquidity sheet (optional)
     liq_df = process_liquidity_sheet(sheets_map)
 
-    # Bounds for sidebar presets (based on current branches, initially all)
+    # Sidebar preset bounds
     all_branches = sorted(df_all["BranchName"].dropna().unique()) if "BranchName" in df_all else []
     if "selected_branches" not in st.session_state:
         st.session_state.selected_branches = list(all_branches)
@@ -710,7 +730,7 @@ def main():
     if "end_date" not in st.session_state:
         st.session_state.end_date = dmax_sb
 
-    # -------- Sidebar (Actions, Quick Range, Custom Date, Snapshot) --------
+    # -------- Sidebar --------
     with st.sidebar:
         st.markdown('<div class="sb-title">📊 <span>AL KHAIR DASHBOARD</span></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-subtle">Filters affect all tabs.</div>', unsafe_allow_html=True)
@@ -756,7 +776,7 @@ def main():
 
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
 
-        # Snapshot (quick numbers)
+        # Snapshot
         df_snap = df_for_bounds.copy()
         if "Date" in df_snap.columns and df_snap["Date"].notna().any():
             mask_snap = (df_snap["Date"].dt.date >= st.session_state.start_date) & (df_snap["Date"].dt.date <= st.session_state.end_date)
@@ -790,7 +810,7 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # ===== 📱 Mobile filter drawer (visible only on phones) =====
+    # ===== Mobile filter drawer =====
     st.markdown('<div class="mobile-only">', unsafe_allow_html=True)
     with st.expander("📱 Filters", expanded=False):
         preset_m = st.radio(
@@ -824,7 +844,7 @@ def main():
             st.session_state.start_date, st.session_state.end_date = dmin_all, dmax_all
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Apply branch filter (main page toggles)
+    # Apply branch filter
     df = df_all.copy()
     if "BranchName" in df.columns:
         prev_sel = tuple(st.session_state.get("selected_branches", []))
@@ -850,12 +870,9 @@ def main():
 
         s = st.session_state.start_date
         e = st.session_state.end_date
-        if s < dmin or s > dmax:
-            s = dmin
-        if e > dmax or e < dmin:
-            e = dmax
-        if s > e:
-            s, e = dmin, dmax
+        if s < dmin or s > dmax: s = dmin
+        if e > dmax or e < dmin: e = dmax
+        if s > e: s, e = dmin, dmax
         st.session_state.start_date, st.session_state.end_date = s, e
 
         c1, c2, _ = st.columns([2, 2, 6])
@@ -883,19 +900,13 @@ def main():
         k["total_sales_target"] = float(df_in.get("SalesTarget", pd.Series(dtype=float)).sum())
         k["total_sales_actual"] = float(df_in.get("SalesActual", pd.Series(dtype=float)).sum())
         k["total_sales_variance"] = k["total_sales_actual"] - k["total_sales_target"]
-        k["overall_sales_percent"] = (
-            k["total_sales_actual"] / k["total_sales_target"] * 100 if k["total_sales_target"] > 0 else 0.0
-        )
+        k["overall_sales_percent"] = (k["total_sales_actual"] / k["total_sales_target"] * 100) if k["total_sales_target"] > 0 else 0.0
         k["total_nob_target"] = float(df_in.get("NOBTarget", pd.Series(dtype=float)).sum())
         k["total_nob_actual"] = float(df_in.get("NOBActual", pd.Series(dtype=float)).sum())
-        k["overall_nob_percent"] = (
-            k["total_nob_actual"] / k["total_nob_target"] * 100 if k["total_nob_target"] > 0 else 0.0
-        )
+        k["overall_nob_percent"] = (k["total_nob_actual"] / k["total_nob_target"] * 100) if k["total_nob_target"] > 0 else 0.0
         k["avg_abv_target"] = float(df_in.get("ABVTarget", pd.Series(dtype=float)).mean()) if "ABVTarget" in df_in else 0.0
         k["avg_abv_actual"] = float(df_in.get("ABVActual", pd.Series(dtype=float)).mean()) if "ABVActual" in df_in else 0.0
-        k["overall_abv_percent"] = (
-            k["avg_abv_actual"] / k["avg_abv_target"] * 100 if "ABVTarget" in df_in and k["avg_abv_target"] > 0 else 0.0
-        )
+        k["overall_abv_percent"] = (k["avg_abv_actual"] / k["avg_abv_target"] * 100) if "ABVTarget" in df_in and k["avg_abv_target"] > 0 else 0.0
         if "BranchName" in df_in.columns:
             k["branch_performance"] = (
                 df_in.groupby("BranchName")
@@ -943,7 +954,7 @@ def main():
         else:
             st.write("All metrics look healthy for the current selection.")
 
-    # Tabs (add Liquidity if available)
+    # Tabs (Liquidity if available)
     has_liquidity = not liq_df.empty
     if has_liquidity:
         t1, t2, t3, t4 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "📥 Export", "💧 Liquidity"])
