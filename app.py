@@ -28,7 +28,7 @@ class Config:
         "Magnus - 107": {"name": "Magnus", "code": "107", "color": "#8b5cf6"},
     }
     TARGETS = {"sales_achievement": 95.0, "nob_achievement": 90.0, "abv_achievement": 90.0}
-    SHOW_SUBTITLE = False  # hide "Branches • Rows • Date range"
+    SHOW_SUBTITLE = False  # set True if you want to show "Branches • Rows • Date range"
 
 
 config = Config()
@@ -36,7 +36,7 @@ st.set_page_config(page_title=config.PAGE_TITLE, layout=config.LAYOUT, initial_s
 
 
 # =========================================
-# CSS (center metrics + table headers + responsive)
+# CSS (with responsive fixes)
 # =========================================
 def apply_css():
     st.markdown(
@@ -44,29 +44,34 @@ def apply_css():
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
         html, body, [data-testid="stAppViewContainer"] { font-family: 'Inter', sans-serif; }
+
         .main .block-container { padding: 1.2rem 2rem; max-width: 1500px; }
 
         /* ---- HERO HEADER ---- */
         .hero { text-align:center; margin: 0 0 10px 0; }
-        .hero-bar { width: min(1100px,95%); height:18px; margin:8px auto 18px;
-          border-radius:14px; background:linear-gradient(90deg,#3b82f6 0%, #4338ca 100%);
-          box-shadow:0 12px 30px rgba(67,56,202,.25);}
-        .hero-title { font-weight:900; font-size:clamp(26px,3.6vw,42px); letter-spacing:.2px;
-          color:#111827; display:inline-flex; align-items:center; gap:.55rem; }
-        .hero-emoji { font-size:1.15em; }
+        .hero-bar {
+          width: min(1100px, 95%);
+          height: 18px; margin: 8px auto 18px;
+          border-radius: 14px;
+          background: linear-gradient(90deg, #3b82f6 0%, #4338ca 100%);
+          box-shadow: 0 12px 30px rgba(67,56,202,.25);
+        }
+        .hero-title {
+          font-weight: 900;
+          font-size: clamp(26px, 3.6vw, 42px);
+          letter-spacing: .2px;
+          color: #111827;
+          display: inline-flex; align-items: center; gap:.55rem;
+        }
+        .hero-emoji { font-size: 1.15em; }
+
         .subtitle { color:#6b7280; font-size:.95rem; margin-bottom:1rem; text-align:center; }
 
-        /* --- Metric tiles: centered + smaller numbers --- */
-        [data-testid="metric-container"]{
-          background:#fff!important;border-radius:16px!important;border:1px solid rgba(0,0,0,.06)!important;
-          padding:16px!important;text-align:center!important;
+        /* Metric tiles */
+        [data-testid="metric-container"] {
+            background:#fff !important; border-radius:16px !important;
+            border:1px solid rgba(0,0,0,.06)!important; padding:18px!important;
         }
-        [data-testid="stMetricValue"]{
-          font-size:clamp(16px,2.2vw,22px)!important;
-          line-height:1.2!important;
-        }
-        [data-testid="stMetricLabel"]{ font-size:.85rem!important;color:#6b7280!important; }
-
         .card { background:#fcfcfc; border:1px solid #f1f5f9; border-radius:16px; padding:16px; height:100%; }
         .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-weight:700; font-size:.80rem; }
         .pill.excellent { background:#ecfdf5; color:#059669; }
@@ -74,32 +79,51 @@ def apply_css():
         .pill.warn      { background:#fffbeb; color:#d97706; }
         .pill.danger    { background:#fef2f2; color:#dc2626; }
 
-        /* Tabs */
+        /* Tabs styling */
         .stTabs [data-baseweb="tab-list"] { gap: 8px; border-bottom: none; }
         .stTabs [data-baseweb="tab"] {
-          border-radius: 10px 10px 0 0 !important; padding: 10px 18px !important; font-weight: 700 !important;
-          background:#f3f4f6!important; color:#374151!important; border:1px solid #e5e7eb!important; border-bottom:none!important;
+          border-radius: 10px 10px 0 0 !important;
+          padding: 10px 18px !important; font-weight: 700 !important;
+          background: #f3f4f6 !important; color: #374151 !important;
+          border: 1px solid #e5e7eb !important; border-bottom: none !important;
         }
-        .stTabs [data-baseweb="tab"]:hover { background:#e5e7eb!important; }
-        .stTabs [aria-selected="true"] { color:#fff!important; box-shadow:0 4px 12px rgba(0,0,0,.15); }
+        .stTabs [data-baseweb="tab"]:hover { background:#e5e7eb !important; }
+        .stTabs [aria-selected="true"] { color: #fff !important; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .stTabs [data-baseweb="tab"]:nth-child(1)[aria-selected="true"] { background: linear-gradient(135deg,#ef4444 0%,#f87171 100%) !important; border-color:#f87171 !important; }
+        .stTabs [data-baseweb="tab"]:nth-child(2)[aria-selected="true"] { background: linear-gradient(135deg,#3b82f6 0%,#60a5fa 100%) !important; border-color:#60a5fa !important; }
+        .stTabs [data-baseweb="tab"]:nth-child(3)[aria-selected="true"] { background: linear-gradient(135deg,#8b5cf6 0%,#a78bfa 100%) !important; border-color:#a78bfa !important; }
+        .stTabs [data-baseweb="tab"]:nth-child(4)[aria-selected="true"] { background: linear-gradient(135deg,#10b981 0%,#34d399 100%) !important; border-color:#34d399 !important; }
 
-        /* Sidebar basics */
-        [data-testid="stSidebar"]{ background:#f7f9fc; border-right:1px solid #e5e7eb; min-width:280px; max-width:320px; }
-        [data-testid="stSidebar"] .block-container { padding:18px 16px 20px; }
-        .sb-title{ display:flex; gap:10px; align-items:center; font-weight:900; font-size:1.05rem; }
-        .sb-subtle{ color:#6b7280; font-size:.85rem; margin:6px 0 12px; }
-        .sb-section{ font-size:.80rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; color:#64748b; margin:12px 4px 6px; }
-        .sb-hr{ height:1px; background:#e5e7eb; margin:12px 0; border-radius:999px; }
+        /* Sidebar */
+        [data-testid="stSidebar"] {
+          background: #f7f9fc; border-right: 1px solid #e5e7eb; min-width: 280px; max-width: 320px;
+        }
+        [data-testid="stSidebar"] .block-container { padding: 18px 16px 20px; }
+        .sb-title { display:flex; gap:10px; align-items:center; font-weight:900; font-size:1.05rem; }
+        .sb-subtle { color:#6b7280; font-size:.85rem; margin:6px 0 12px; }
+        .sb-section { font-size:.80rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; color:#64748b; margin:12px 4px 6px; }
+        .sb-hr { height:1px; background:#e5e7eb; margin:12px 0; border-radius:999px; }
 
-        /* Center DataFrame headers only */
-        .stDataFrame table thead tr th { text-align: center !important; }
+        /* Liquidity metrics panel */
+        .liq-panel { background:#ffffff; border:1px solid #eef2f7; border-radius:16px; padding:16px; }
+        .liq-title { font-weight:900; font-size:1.1rem; display:flex; gap:.5rem; align-items:center; }
+        .liq-k { margin-top:10px; }
+        .liq-k .label { color:#6b7280; font-size:.85rem; margin-top:.5rem; }
+        .liq-k .value { font-weight:900; font-size:2rem; }
+        .subtle { color:#6b7280; font-size:.9rem; }
 
-        /* Responsive */
-        [data-testid="stPlotlyChart"], [data-testid="stDataFrame"] { overflow:auto; }
-        .js-plotly-plot, .plotly, .js-plotly-plot .plotly, .js-plotly-plot .main-svg { max-width:100%!important; }
+        /* -------- RESPONSIVE FIXES -------- */
+        /* Let column rows wrap on small screens so tiles/charts don't get cut */
+        [data-testid="stHorizontalBlock"] { display:flex; flex-wrap: wrap; gap: 1rem; }
+        [data-testid="stHorizontalBlock"] > div { min-width: 260px; flex: 1 1 260px; }
 
-        @media (max-width: 820px){
-          .main .block-container { padding:.6rem .8rem; }
+        /* Plotly & DataFrames never overflow */
+        [data-testid="stPlotlyChart"], [data-testid="stDataFrame"] { overflow: auto; }
+        .js-plotly-plot, .plotly, .js-plotly-plot .plotly, .js-plotly-plot .main-svg { max-width: 100% !important; }
+
+        @media (max-width: 820px) {
+          .main .block-container { padding: .6rem .8rem; }
+          .liq-k .value { font-size: 1.6rem; }
         }
         </style>
         """,
@@ -208,10 +232,20 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         if "Date" in d.columns:
             d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
         for col in [
-            "SalesTarget", "SalesActual", "SalesPercent",
-            "NOBTarget", "NOBActual", "NOBPercent",
-            "ABVTarget", "ABVActual", "ABVPercent",
-            "Bank", "Cash", "TotalLiquidity", "ChangeLiquidity", "PctChange",
+            "SalesTarget",
+            "SalesActual",
+            "SalesPercent",
+            "NOBTarget",
+            "NOBActual",
+            "NOBPercent",
+            "ABVTarget",
+            "ABVActual",
+            "ABVPercent",
+            "Bank",
+            "Cash",
+            "TotalLiquidity",
+            "ChangeLiquidity",
+            "PctChange",
         ]:
             if col in d.columns:
                 d[col] = _parse_numeric(d[col])
@@ -226,28 +260,49 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
     k["total_sales_target"] = float(df.get("SalesTarget", pd.Series(dtype=float)).sum())
     k["total_sales_actual"] = float(df.get("SalesActual", pd.Series(dtype=float)).sum())
     k["total_sales_variance"] = k["total_sales_actual"] - k["total_sales_target"]
-    k["overall_sales_percent"] = k["total_sales_actual"] / k["total_sales_target"] * 100 if k["total_sales_target"] > 0 else 0.0
+    k["overall_sales_percent"] = (
+        k["total_sales_actual"] / k["total_sales_target"] * 100 if k["total_sales_target"] > 0 else 0.0
+    )
     k["total_nob_target"] = float(df.get("NOBTarget", pd.Series(dtype=float)).sum())
     k["total_nob_actual"] = float(df.get("NOBActual", pd.Series(dtype=float)).sum())
-    k["overall_nob_percent"] = k["total_nob_actual"] / k["total_nob_target"] * 100 if k["total_nob_target"] > 0 else 0.0
+    k["overall_nob_percent"] = (
+        k["total_nob_actual"] / k["total_nob_target"] * 100 if k["total_nob_target"] > 0 else 0.0
+    )
     k["avg_abv_target"] = float(df.get("ABVTarget", pd.Series(dtype=float)).mean()) if "ABVTarget" in df else 0.0
     k["avg_abv_actual"] = float(df.get("ABVActual", pd.Series(dtype=float)).mean()) if "ABVActual" in df else 0.0
-    k["overall_abv_percent"] = (k["avg_abv_actual"] / k["avg_abv_target"] * 100) if ("ABVTarget" in df and k["avg_abv_target"] > 0) else 0.0
+    k["overall_abv_percent"] = (
+        k["avg_abv_actual"] / k["avg_abv_target"] * 100 if "ABVTarget" in df and k["avg_abv_target"] > 0 else 0.0
+    )
     if "BranchName" in df.columns:
         k["branch_performance"] = (
             df.groupby("BranchName")
-            .agg({
-                "SalesTarget": "sum", "SalesActual": "sum", "SalesPercent": "mean",
-                "NOBTarget": "sum", "NOBActual": "sum", "NOBPercent": "mean",
-                "ABVTarget": "mean", "ABVActual": "mean", "ABVPercent": "mean",
-            }).round(2)
+            .agg(
+                {
+                    "SalesTarget": "sum",
+                    "SalesActual": "sum",
+                    "SalesPercent": "mean",
+                    "NOBTarget": "sum",
+                    "NOBActual": "sum",
+                    "NOBPercent": "mean",
+                    "ABVTarget": "mean",
+                    "ABVActual": "mean",
+                    "ABVPercent": "mean",
+                }
+            )
+            .round(2)
         )
     if "Date" in df.columns and df["Date"].notna().any():
         k["date_range"] = {"start": df["Date"].min(), "end": df["Date"].max(), "days": int(df["Date"].dt.date.nunique())}
     score = w = 0.0
-    if k.get("overall_sales_percent", 0) > 0: score += min(k["overall_sales_percent"]/100, 1.2)*40; w += 40
-    if k.get("overall_nob_percent", 0) > 0:   score += min(k["overall_nob_percent"]/100, 1.2)*35; w += 35
-    if k.get("overall_abv_percent", 0) > 0:   score += min(k["overall_abv_percent"]/100, 1.2)*25; w += 25
+    if k.get("overall_sales_percent", 0) > 0:
+        score += min(k["overall_sales_percent"] / 100, 1.2) * 40
+        w += 40
+    if k.get("overall_nob_percent", 0) > 0:
+        score += min(k["overall_nob_percent"] / 100, 1.2) * 35
+        w += 35
+    if k.get("overall_abv_percent", 0) > 0:
+        score += min(k["overall_abv_percent"] / 100, 1.2) * 25
+        w += 25
     k["performance_score"] = (score / w * 100) if w > 0 else 0.0
     return k
 
@@ -258,6 +313,7 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
 def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool = True) -> go.Figure:
     if df.empty or "Date" not in df.columns or df["Date"].isna().all():
         return go.Figure()
+
     agg_func = "sum" if y_col != "ABVActual" else "mean"
     daily_actual = df.groupby(["Date", "BranchName"]).agg({y_col: agg_func}).reset_index()
     target_col = {"SalesActual": "SalesTarget", "NOBActual": "NOBTarget", "ABVActual": "ABVTarget"}.get(y_col)
@@ -265,115 +321,198 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool 
     if show_target and target_col and target_col in df.columns:
         agg_func_target = "sum" if y_col != "ABVActual" else "mean"
         daily_target = df.groupby(["Date", "BranchName"]).agg({target_col: agg_func_target}).reset_index()
+
     fig = go.Figure()
     palette = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#14b8a6"]
     for i, br in enumerate(sorted(daily_actual["BranchName"].unique())):
         d_actual = daily_actual[daily_actual["BranchName"] == br]
         color = palette[i % len(palette)]
-        fig.add_trace(go.Scatter(
-            x=d_actual["Date"], y=d_actual[y_col], name=f"{br} - Actual",
-            mode="lines+markers", line=dict(width=3, color=color), fill="tozeroy",
-            hovertemplate=f"<b>{br}</b><br>Date: %{{x|%Y-%m-%d}}<br>Actual: %{{y:,.0f}}<extra></extra>",
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=d_actual["Date"],
+                y=d_actual[y_col],
+                name=f"{br} - Actual",
+                mode="lines+markers",
+                line=dict(width=3, color=color),
+                fill="tozeroy",
+                hovertemplate=f"<b>{br}</b><br>Date: %{{x|%Y-%m-%d}}<br>Actual: %{{y:,.0f}}<extra></extra>",
+            )
+        )
         if daily_target is not None:
             d_target = daily_target[daily_target["BranchName"] == br]
-            fig.add_trace(go.Scatter(
-                x=d_target["Date"], y=d_target[target_col], name=f"{br} - Target",
-                mode="lines", line=dict(width=2, color=color, dash="dash"),
-                hovertemplate=f"<b>{br}</b><br>Date: %{{x|%Y-%m-%d}}<br>Target: %{{y:,.0f}}<extra></extra>",
-                showlegend=False if len(sorted(daily_actual["BranchName"].unique())) > 1 else True,
-            ))
+            fig.add_trace(
+                go.Scatter(
+                    x=d_target["Date"],
+                    y=d_target[target_col],
+                    name=f"{br} - Target",
+                    mode="lines",
+                    line=dict(width=2, color=color, dash="dash"),
+                    hovertemplate=f"<b>{br}</b><br>Date: %{{x|%Y-%m-%d}}<br>Target: %{{y:,.0f}}<extra></extra>",
+                    showlegend=False if len(sorted(daily_actual["BranchName"].unique())) > 1 else True,
+                )
+            )
     fig.update_layout(
-        title=title, height=420, showlegend=True,
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        title=title,
+        height=420,
+        showlegend=True,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
         legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
-        xaxis_title="Date", yaxis_title="Value",
-        autosize=True, margin=dict(l=40, r=20, t=40, b=40),
+        xaxis_title="Date",
+        yaxis_title="Value",
+        autosize=True,
+        margin=dict(l=40, r=20, t=40, b=40),
     )
     return fig
 
 
 def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
-    if bp.empty: return go.Figure()
+    if bp.empty:
+        return go.Figure()
     metrics = {"SalesPercent": "Sales %", "NOBPercent": "NOB %", "ABVPercent": "ABV %"}
     fig = go.Figure()
     x = bp.index.tolist()
     palette = ["#3b82f6", "#10b981", "#f59e0b"]
     for i, (col, label) in enumerate(metrics.items()):
-        fig.add_trace(go.Bar(x=x, y=bp[col].tolist(), name=label, marker=dict(color=palette[i % len(palette)])))
+        y = bp[col].tolist()
+        fig.add_trace(go.Bar(x=x, y=y, name=label, marker=dict(color=palette[i % len(palette)])))
     fig.update_layout(
-        barmode="group", title="Branch Performance Comparison (%)",
-        xaxis_title="Branch", yaxis_title="Percent", height=400,
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        barmode="group",
+        title="Branch Performance Comparison (%)",
+        xaxis_title="Branch",
+        yaxis_title="Percent",
+        height=400,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
         legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
-        autosize=True, margin=dict(l=40, r=20, t=40, b=40),
+        autosize=True,
+        margin=dict(l=40, r=20, t=40, b=40),
     )
     return fig
 
 
-# ========= Liquidity Trend (used in Liquidity tab) =========
+# ========= Liquidity Trend (Pic #1 style) =========
 def _liquidity_total_trend_fig(daily: pd.DataFrame, title: str = "Total Liquidity Trend") -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=daily["Date"], y=daily["TotalLiquidity"], mode="lines+markers",
-        line=dict(width=4, color="#3b82f6"), marker=dict(size=6),
-        hovertemplate="Date: %{x|%b %d, %Y}<br>Liquidity: SAR %{y:,.0f}<extra></extra>",
-        name="Total Liquidity",
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=daily["Date"],
+            y=daily["TotalLiquidity"],
+            mode="lines+markers",
+            line=dict(width=4, color="#3b82f6"),
+            marker=dict(size=6),
+            hovertemplate="Date: %{x|%b %d, %Y}<br>Liquidity: SAR %{y:,.0f}<extra></extra>",
+            name="Total Liquidity",
+        )
+    )
     fig.update_layout(
-        title=title, height=420, showlegend=False,
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        xaxis_title="Date", yaxis_title="Liquidity (SAR)",
-        autosize=True, margin=dict(l=40, r=20, t=40, b=40),
+        title=title,
+        height=420,
+        showlegend=False,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        xaxis_title="Date",
+        yaxis_title="Liquidity (SAR)",
+        autosize=True,
+        margin=dict(l=40, r=20, t=40, b=40),
     )
     return fig
+
+
+def _fmt(n: Optional[float]) -> str:
+    if n is None or np.isnan(n):
+        return "—"
+    return f"{n:,.0f}"
+
+
+def render_liquidity_tab(df: pd.DataFrame):
+    if df.empty or "Date" not in df or "TotalLiquidity" not in df:
+        st.info("Liquidity columns not found. Include 'TOTAL LIQUIDITY' in your sheet.")
+        return
+
+    d = df.dropna(subset=["Date", "TotalLiquidity"]).copy()
+    if d.empty:
+        st.info("No liquidity rows in the selected range.")
+        return
+
+    daily = d.groupby("Date", as_index=False)["TotalLiquidity"].sum().sort_values("Date")
+    last30 = daily.tail(30).copy()
+
+    current = float(last30["TotalLiquidity"].iloc[-1]) if len(last30) >= 1 else np.nan
+    prev = float(last30["TotalLiquidity"].iloc[-2]) if len(last30) >= 2 else np.nan
+    trend_pct = ((current - prev) / prev * 100.0) if (len(last30) >= 2 and not np.isnan(prev) and prev != 0) else np.nan
+
+    max_30 = float(last30["TotalLiquidity"].max()) if not last30.empty else np.nan
+    min_30 = float(last30["TotalLiquidity"].min()) if not last30.empty else np.nan
+    avg_30 = float(last30["TotalLiquidity"].mean()) if not last30.empty else np.nan
+
+    col_chart, col_metrics = st.columns([3, 1], gap="large")
+
+    with col_chart:
+        st.markdown("#### 🧪 Liquidity Trend Analysis")
+        st.plotly_chart(_liquidity_total_trend_fig(last30), use_container_width=True, config={"displayModeBar": False})
+
+    with col_metrics:
+        st.markdown(
+            """
+            <div class="liq-panel">
+              <div class="liq-title">📊 Liquidity Metrics</div>
+              <div class="liq-k">
+                <div class="label">Current</div>
+                <div class="value">{cur}</div>
+              </div>
+              <div class="liq-k">
+                <div class="label">Trend</div>
+                <div class="value">{trend}</div>
+              </div>
+              <div class="liq-k">
+                <div class="label">Statistics (30d)</div>
+                <div class="subtle">Max: {mx}</div>
+                <div class="subtle">Min: {mn}</div>
+                <div class="subtle">Avg: {avg}</div>
+              </div>
+            </div>
+            """.format(
+                cur=_fmt(current),
+                trend=("+" if (not np.isnan(trend_pct) and trend_pct >= 0) else "") + (f"{trend_pct:.1f}%" if not np.isnan(trend_pct) else "—"),
+                mx=_fmt(max_30),
+                mn=_fmt(min_30),
+                avg=_fmt(avg_30),
+            ),
+            unsafe_allow_html=True,
+        )
 
 
 # =========================================
 # RENDER HELPERS
 # =========================================
 def branch_status_class(pct: float) -> str:
-    if pct >= 95: return "excellent"
-    if pct >= 85: return "good"
-    if pct >= 75: return "warn"
+    if pct >= 95:
+        return "excellent"
+    if pct >= 85:
+        return "good"
+    if pct >= 75:
+        return "warn"
     return "danger"
 
 
 def _branch_color_by_name(name: str) -> str:
     for _, meta in config.BRANCHES.items():
-        if meta.get("name") == name: return meta.get("color", "#6b7280")
+        if meta.get("name") == name:
+            return meta.get("color", "#6b7280")
     return "#6b7280"
 
 
-def _balanced_rows(n: int) -> List[int]:
-    """Return a list of column counts per row to avoid lonely last cards."""
-    rows: List[int] = []
-    remaining = n
-    while remaining > 0:
-        if remaining % 3 == 1 and remaining != 1:
-            take = 2
-        else:
-            take = min(3, remaining)
-        rows.append(take)
-        remaining -= take
-    return rows
-
-
 def render_branch_cards(bp: pd.DataFrame):
-    """Old-model look but with balanced rows to keep alignment nice."""
     st.markdown("### 🏪 Branch Overview")
     if bp.empty:
         st.info("No branch summary available.")
         return
-
+    cols_per_row = 3
     items = list(bp.index)
-    layout = _balanced_rows(len(items))  # e.g., 4 -> [2,2], 5 -> [3,2], 7 -> [2,3,2]
-    idx = 0
-
-    for cols_in_row in layout:
-        row = st.columns(cols_in_row, gap="medium")
-        for j in range(cols_in_row):
-            br = items[idx]; idx += 1
+    for i in range(0, len(items), cols_per_row):
+        row = st.columns(cols_per_row, gap="medium")
+        for j, br in enumerate(items[i : i + cols_per_row]):
             with row[j]:
                 r = bp.loc[br]
                 avg_pct = float(np.nanmean([r.get("SalesPercent", 0), r.get("NOBPercent", 0), r.get("ABVPercent", 0)]) or 0)
@@ -403,10 +542,15 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("💰 Total Sales", f"SAR {k.get('total_sales_actual',0):,.0f}", delta=f"vs Target: {k.get('overall_sales_percent',0):.1f}%")
     variance_color = "normal" if k.get("total_sales_variance", 0) >= 0 else "inverse"
-    c2.metric("📊 Sales Variance", f"SAR {k.get('total_sales_variance',0):,.0f}", delta=f"{k.get('overall_sales_percent',0)-100:+.1f}%", delta_color=variance_color)
-    nob_color = "normal" if k.get("overall_nob_percent", 0) >= config.TARGETS['nob_achievement'] else "inverse"
+    c2.metric(
+        "📊 Sales Variance",
+        f"SAR {k.get('total_sales_variance',0):,.0f}",
+        delta=f"{k.get('overall_sales_percent',0)-100:+.1f}%",
+        delta_color=variance_color,
+    )
+    nob_color = "normal" if k.get("overall_nob_percent", 0) >= config.TARGETS["nob_achievement"] else "inverse"
     c3.metric("🛍️ Total Baskets", f"{k.get('total_nob_actual',0):,.0f}", delta=f"Achievement: {k.get('overall_nob_percent',0):.1f}%", delta_color=nob_color)
-    abv_color = "normal" if k.get("overall_abv_percent", 0) >= config.TARGETS['abv_achievement'] else "inverse"
+    abv_color = "normal" if k.get("overall_abv_percent", 0) >= config.TARGETS["abv_achievement"] else "inverse"
     c4.metric("💎 Avg Basket Value", f"SAR {k.get('avg_abv_actual',0):,.2f}", delta=f"vs Target: {k.get('overall_abv_percent',0):.1f}%", delta_color=abv_color)
     score_color = "normal" if k.get("performance_score", 0) >= 80 else "off"
     c5.metric("⭐ Performance Score", f"{k.get('performance_score',0):.0f}/100", delta="Weighted Score", delta_color=score_color)
@@ -419,22 +563,29 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
         bp = k["branch_performance"].copy()
         df_table = (
             bp[["SalesPercent", "NOBPercent", "ABVPercent", "SalesActual", "SalesTarget"]]
-            .rename(columns={
-                "SalesPercent": "Sales %",
-                "NOBPercent": "NOB %",
-                "ABVPercent": "ABV %",
-                "SalesActual": "Sales (Actual)",
-                "SalesTarget": "Sales (Target)",
-            })
+            .rename(
+                columns={
+                    "SalesPercent": "Sales %",
+                    "NOBPercent": "NOB %",
+                    "ABVPercent": "ABV %",
+                    "SalesActual": "Sales (Actual)",
+                    "SalesTarget": "Sales (Target)",
+                }
+            )
             .round(1)
         )
-        # Center headers only
-        styler = (
-            df_table.style
-            .format({"Sales %": "{:,.1f}", "NOB %": "{:,.1f}", "ABV %": "{:,.1f}", "Sales (Actual)": "{:,.0f}", "Sales (Target)": "{:,.0f}"})
-            .set_table_styles([{"selector": "th", "props": [("text-align", "center")]}])
+        st.dataframe(
+            df_table.style.format(
+                {
+                    "Sales %": "{:,.1f}",
+                    "NOB %": "{:,.1f}",
+                    "ABV %": "{:,.1f}",
+                    "Sales (Actual)": "{:,.0f}",
+                    "Sales (Target)": "{:,.0f}",
+                }
+            ),
+            use_container_width=True,
         )
-        st.dataframe(styler, use_container_width=True)
 
         st.markdown("### 📉 Branch Performance Comparison")
         st.plotly_chart(_branch_comparison_chart(bp), use_container_width=True, config={"displayModeBar": False})
@@ -449,52 +600,66 @@ def main():
     # Load data
     sheets_map = load_workbook_from_gsheet(config.DEFAULT_PUBLISHED_URL)
     if not sheets_map:
-        st.warning("No non-empty sheets found."); st.stop()
+        st.warning("No non-empty sheets found.")
+        st.stop()
     df_all = process_branch_data(sheets_map)
     if df_all.empty:
-        st.error("Could not process data. Check column names and sheet structure."); st.stop()
+        st.error("Could not process data. Check column names and sheet structure.")
+        st.stop()
 
-    # Sidebar filters
     all_branches = sorted(df_all["BranchName"].dropna().unique()) if "BranchName" in df_all else []
     if "selected_branches" not in st.session_state:
         st.session_state.selected_branches = list(all_branches)
 
+    # -------- Sidebar: Actions + Branch (manual) + Dates --------
     with st.sidebar:
         st.markdown('<div class="sb-title">📊 <span>AL KHAIR DASHBOARD</span></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-subtle">Filters affect all tabs.</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="sb-section">Actions</div>', unsafe_allow_html=True)
         if st.button("🔄 Refresh Data", use_container_width=True):
-            load_workbook_from_gsheet.clear(); st.rerun()
+            load_workbook_from_gsheet.clear()
+            st.rerun()
+
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
 
         st.markdown('<div class="sb-section">Branches</div>', unsafe_allow_html=True)
         ca, cb = st.columns(2)
-        if ca.button("All", use_container_width=True): st.session_state.selected_branches = list(all_branches); st.rerun()
-        if cb.button("None", use_container_width=True): st.session_state.selected_branches = []; st.rerun()
-        sel = []
+        if ca.button("All", use_container_width=True):
+            st.session_state.selected_branches = list(all_branches)
+            st.rerun()
+        if cb.button("None", use_container_width=True):
+            st.session_state.selected_branches = []
+            st.rerun()
+
+        sel: List[str] = []
         for i, b in enumerate(all_branches):
-            if st.checkbox(b, value=(b in st.session_state.selected_branches), key=f"sb_br_{i}"): sel.append(b)
+            checked = st.checkbox(b, value=(b in st.session_state.selected_branches), key=f"sb_br_{i}")
+            if checked:
+                sel.append(b)
         st.session_state.selected_branches = sel
 
         df_for_bounds = df_all[df_all["BranchName"].isin(st.session_state.selected_branches)].copy() if st.session_state.selected_branches else df_all.copy()
         if "Date" in df_for_bounds.columns and df_for_bounds["Date"].notna().any():
-            dmin_sb, dmax_sb = df_for_bounds["Date"].min().date(), df_for_bounds["Date"].max().date()
+            dmin_sb = df_for_bounds["Date"].min().date()
+            dmax_sb = df_for_bounds["Date"].max().date()
         else:
             dmin_sb = dmax_sb = datetime.today().date()
 
-        if "start_date" not in st.session_state: st.session_state.start_date = dmin_sb
-        if "end_date" not in st.session_state:   st.session_state.end_date = dmax_sb
+        if "start_date" not in st.session_state:
+            st.session_state.start_date = dmin_sb
+        if "end_date" not in st.session_state:
+            st.session_state.end_date = dmax_sb
 
         st.markdown('<div class="sb-section">Custom Date</div>', unsafe_allow_html=True)
         _sd = st.date_input("Start:", value=st.session_state.start_date, min_value=dmin_sb, max_value=dmax_sb, key="sb_sd")
-        _ed = st.date_input("End:", value=st.session_state.end_date,   min_value=dmin_sb, max_value=dmax_sb, key="sb_ed")
+        _ed = st.date_input("End:", value=st.session_state.end_date, min_value=dmin_sb, max_value=dmax_sb, key="sb_ed")
         st.session_state.start_date = max(dmin_sb, min(_sd, dmax_sb))
-        st.session_state.end_date   = max(dmin_sb, min(_ed, dmax_sb))
+        st.session_state.end_date = max(dmin_sb, min(_ed, dmax_sb))
         if st.session_state.start_date > st.session_state.end_date:
             st.session_state.start_date, st.session_state.end_date = dmin_sb, dmax_sb
 
-    # Hero
+    # ===== HERO HEADER =====
     st.markdown(
         f"""
         <div class="hero">
@@ -504,9 +669,13 @@ def main():
         """,
         unsafe_allow_html=True,
     )
+
     if config.SHOW_SUBTITLE and "Date" in df_all.columns and df_all["Date"].notna().any():
         date_span = f"{df_all['Date'].min().date()} → {df_all['Date'].max().date()}"
-        st.markdown(f"<div class='subtitle'>Branches: {df_all['BranchName'].nunique()} • Rows: {len(df_all):,} • {date_span}</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='subtitle'>Branches: {df_all['BranchName'].nunique() if 'BranchName' in df_all else 0} • Rows: {len(df_all):,} • {date_span}</div>",
+            unsafe_allow_html=True,
+        )
 
     # Apply filters
     df = df_all.copy()
@@ -515,17 +684,18 @@ def main():
     if "Date" in df.columns and df["Date"].notna().any():
         mask = (df["Date"].dt.date >= st.session_state.start_date) & (df["Date"].dt.date <= st.session_state.end_date)
         df = df.loc[mask].copy()
-        if df.empty: st.warning("No rows in selected date range."); st.stop()
+        if df.empty:
+            st.warning("No rows in selected date range.")
+            st.stop()
 
     # ======================
-    # Quick Insights (with Liquidity)
+    # KPIs + Quick insights  (safe: no help() calls)
     # ======================
     k = calc_kpis(df)
     exp_qi = st.expander("⚡ Quick Insights", expanded=True)
     with exp_qi:
         insights: List[str] = []
 
-        # Branch-level sales highlights
         if "branch_performance" in k and isinstance(k["branch_performance"], pd.DataFrame) and not k["branch_performance"].empty:
             bp = k["branch_performance"]
             if not bp["SalesPercent"].isna().all():
@@ -535,39 +705,16 @@ def main():
                 except Exception:
                     pass
             below = bp[bp["SalesPercent"] < config.TARGETS["sales_achievement"]].index.tolist()
-            if below: insights.append("⚠️ Below 95% target: " + ", ".join(below))
+            if below:
+                insights.append("⚠️ Below 95% target: " + ", ".join(below))
+
         if k.get("total_sales_variance", 0) < 0:
             insights.append(f"🟥 Overall variance negative by SAR {abs(k['total_sales_variance']):,.0f}")
 
-        # Liquidity insights (last 30 days in filtered range)
-        if {"TotalLiquidity", "Date"}.issubset(df.columns):
-            dliq = df.dropna(subset=["Date", "TotalLiquidity"]).copy()
-            if not dliq.empty:
-                daily = dliq.groupby("Date", as_index=False)["TotalLiquidity"].sum().sort_values("Date")
-                last30 = daily.tail(30)
-                if not last30.empty:
-                    cur = float(last30["TotalLiquidity"].iloc[-1])
-                    first = float(last30["TotalLiquidity"].iloc[0])
-                    trend_30 = ((cur - first) / first * 100.0) if first not in (0, np.nan) else np.nan
-                    dmax = last30.loc[last30["TotalLiquidity"].idxmax()]
-                    dmin = last30.loc[last30["TotalLiquidity"].idxmin()]
-                    insights.append(f"💧 Liquidity now: SAR {cur:,.0f} • 30-day trend: {('+' if trend_30>=0 else '') + (f'{trend_30:.1f}%' if not np.isnan(trend_30) else '—')}")
-                    insights.append(f"📅 Max day (30d): {dmax['Date'].date()} — SAR {dmax['TotalLiquidity']:,.0f}")
-                    insights.append(f"📅 Min day (30d): {dmin['Date'].date()} — SAR {dmin['TotalLiquidity']:,.0f}")
-
-                if "ChangeLiquidity" in dliq.columns:
-                    win = dliq[dliq["Date"].isin(last30["Date"])] if not last30.empty else dliq
-                    by_branch = win.groupby("BranchName", dropna=True)["ChangeLiquidity"].sum().sort_values()
-                    if not by_branch.empty:
-                        down_br, down_val = by_branch.index[0], float(by_branch.iloc[0])
-                        up_br, up_val = by_branch.index[-1], float(by_branch.iloc[-1])
-                        if up_val > 0:
-                            insights.append(f"🏦 Biggest ↑ branch (30d): {up_br} — SAR {up_val:,.0f}")
-                        if down_val < 0:
-                            insights.append(f"🏦 Biggest ↓ branch (30d): {down_br} — SAR {down_val:,.0f}")
-
-        if insights: st.markdown("\n".join(f"- {line}" for line in insights))
-        else:       st.caption("All metrics look healthy for the current selection.")
+        if insights:
+            st.markdown("\n".join(f"- {line}" for line in insights))
+        else:
+            st.caption("All metrics look healthy for the current selection.")
 
     # Tabs
     t1, t2, t3, t4 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "💧 Liquidity", "📥 Export"])
@@ -581,38 +728,23 @@ def main():
             opts = ["Last 7 Days", "Last 30 Days", "Last 3 Months", "All Time"]
             choice = st.selectbox("Time Period", opts, index=1, key="trend_window")
             today = (df["Date"].max() if df["Date"].notna().any() else pd.Timestamp.today()).date()
-            start = {"Last 7 Days": today - timedelta(days=7),
-                     "Last 30 Days": today - timedelta(days=30),
-                     "Last 3 Months": today - timedelta(days=90)}.get(choice, df["Date"].min().date())
+            start = {
+                "Last 7 Days": today - timedelta(days=7),
+                "Last 30 Days": today - timedelta(days=30),
+                "Last 3 Months": today - timedelta(days=90),
+            }.get(choice, df["Date"].min().date())
             f = df[(df["Date"].dt.date >= start) & (df["Date"].dt.date <= today)].copy()
         else:
             f = df.copy()
-        with m1: st.plotly_chart(_metric_area(f, "SalesActual", "Daily Sales (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
-        with m2: st.plotly_chart(_metric_area(f, "NOBActual", "Number of Baskets (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
-        with m3: st.plotly_chart(_metric_area(f, "ABVActual", "Average Basket Value (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
+        with m1:
+            st.plotly_chart(_metric_area(f, "SalesActual", "Daily Sales (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
+        with m2:
+            st.plotly_chart(_metric_area(f, "NOBActual", "Number of Baskets (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
+        with m3:
+            st.plotly_chart(_metric_area(f, "ABVActual", "Average Basket Value (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
 
     with t3:
-        if {"TotalLiquidity","Date"}.issubset(df.columns):
-            dd = df.dropna(subset=["Date", "TotalLiquidity"]).groupby("Date", as_index=False)["TotalLiquidity"].sum().sort_values("Date")
-            last30 = dd.tail(30)
-            col_chart, col_metrics = st.columns([3,1], gap="large")
-            with col_chart:
-                st.markdown("#### 🧪 Liquidity Trend Analysis")
-                st.plotly_chart(_liquidity_total_trend_fig(last30), use_container_width=True, config={"displayModeBar": False})
-            with col_metrics:
-                cur = float(last30["TotalLiquidity"].iloc[-1]) if not last30.empty else np.nan
-                prev = float(last30["TotalLiquidity"].iloc[-2]) if len(last30)>=2 else np.nan
-                trend = ((cur-prev)/prev*100) if (len(last30)>=2 and prev not in (0, np.nan)) else np.nan
-                mx, mn, avg = (float(last30["TotalLiquidity"].max()) if not last30.empty else np.nan,
-                               float(last30["TotalLiquidity"].min()) if not last30.empty else np.nan,
-                               float(last30["TotalLiquidity"].mean()) if not last30.empty else np.nan)
-                st.markdown(f"**Current:** {('SAR ' + format(cur,',.0f')) if not np.isnan(cur) else '—'}")
-                st.markdown(f"**Trend:** {('+' if (not np.isnan(trend) and trend>=0) else '') + (f'{trend:.1f}%' if not np.isnan(trend) else '—')}")
-                st.markdown(f"**Max (30d):** {('SAR ' + format(mx,',.0f')) if not np.isnan(mx) else '—'}")
-                st.markdown(f"**Min (30d):** {('SAR ' + format(mn,',.0f')) if not np.isnan(mn) else '—'}")
-                st.markdown(f"**Avg (30d):** {('SAR ' + format(avg,',.0f')) if not np.isnan(avg) else '—'}")
-        else:
-            st.info("Liquidity columns not found. Include 'TOTAL LIQUIDITY' in your sheet.")
+        render_liquidity_tab(df)
 
     with t4:
         if df.empty:
