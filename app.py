@@ -17,8 +17,9 @@ import plotly.graph_objects as go
 class Config:
     PAGE_TITLE = "Al Khair Business Performance"
     LAYOUT = "wide"
+    # Use your new XLSX link (best for multi-sheet)
     DEFAULT_PUBLISHED_URL = (
-        "https://docs.google.com/spreadsheets/d/e/2PACX-1vRYrhOc1N4ipUj55mwiXSLC_Qsw0efmAzKhfhnWtVOV2tP9gLEs2VO3I91pF9kdgg/pub?output=csv"
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vROaePKJN3XhRor42BU4Kgd9fCAgW7W8vWJbwjveQWoJy8HCRBUAYh2s0AxGsBa3w/pub?output=xlsx"
     )
     BRANCHES = {
         "Al khair - 102": {"name": "Al Khair", "code": "102", "color": "#3b82f6"},
@@ -106,10 +107,43 @@ def apply_css():
 # =========================================
 # LOADERS / HELPERS
 # =========================================
-def _pubhtml_to_xlsx(url: str) -> str:
-    if "docs.google.com/spreadsheets/d/e/" in url:
-        return re.sub(r"/pubhtml(.*)$", "/pub?output=xlsx", url.strip())
-    return url
+def _normalize_gsheet_url(url: str) -> str:
+    """Prefer XLSX for published Google Sheets; gracefully handle CSV if needed."""
+    u = (url or "").strip()
+    u = re.sub(r"/pubhtml(\?.*)?$", "/pub?output=xlsx", u)            # /pubhtml → xlsx
+    u = re.sub(r"/pub\?output=csv(\&.*)?$", "/pub?output=xlsx", u)    # csv → xlsx
+    return u or url
+
+
+@st.cache_data(show_spinner=False)
+def load_workbook_from_gsheet(published_url: str) -> Dict[str, pd.DataFrame]:
+    url = _normalize_gsheet_url((published_url or config.DEFAULT_PUBLISHED_URL).strip())
+    r = requests.get(url, timeout=60)
+    r.raise_for_status()
+
+    content_type = (r.headers.get("Content-Type") or "").lower()
+
+    # Try XLSX first (preferred)
+    if "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in content_type or "output=xlsx" in url:
+        try:
+            xls = pd.ExcelFile(io.BytesIO(r.content))
+            out: Dict[str, pd.DataFrame] = {}
+            for sn in xls.sheet_names:
+                df = xls.parse(sn).dropna(how="all").dropna(axis=1, how="all")
+                if not df.empty:
+                    out[sn] = df
+            if out:
+                return out
+        except Exception:
+            pass  # fall back to CSV
+
+    # Fallback: parse as CSV (single sheet map)
+    try:
+        df = pd.read_csv(io.BytesIO(r.content))
+    except Exception:
+        df = pd.read_csv(io.BytesIO(r.content), sep=";")
+    df = df.dropna(how="all").dropna(axis=1, how="all")
+    return {"Sheet1": df} if not df.empty else {}
 
 
 def _parse_numeric(s: pd.Series) -> pd.Series:
@@ -117,21 +151,6 @@ def _parse_numeric(s: pd.Series) -> pd.Series:
         s.astype(str).str.replace(",", "", regex=False).str.replace("%", "", regex=False).str.strip(),
         errors="coerce",
     )
-
-
-@st.cache_data(show_spinner=False)
-def load_workbook_from_gsheet(published_url: str) -> Dict[str, pd.DataFrame]:
-    url = _pubhtml_to_xlsx((published_url or config.DEFAULT_PUBLISHED_URL).strip())
-    r = requests.get(url, timeout=60)
-    r.raise_for_status()
-    xls = pd.ExcelFile(io.BytesIO(r.content))
-    sheets: Dict[str, pd.DataFrame] = {}
-    for sn in xls.sheet_names:
-        df = xls.parse(sn)
-        df = df.dropna(how="all").dropna(axis=1, how="all")
-        if not df.empty:
-            sheets[sn] = df
-    return sheets
 
 
 def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -442,7 +461,7 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
         st.plotly_chart(fig_cmp, use_container_width=True, config={"displayModeBar": False})
 
 
-# -------- Branch filter via toggle buttons (kept same on main page) --------
+# -------- Branch filter via toggle buttons --------
 def render_branch_filter_buttons(df: pd.DataFrame, key_prefix: str = "br_") -> List[str]:
     if "BranchName" not in df.columns:
         return []
@@ -621,7 +640,7 @@ def main():
             st.session_state.start_date, st.session_state.end_date = dmin_all, dmax_all
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Apply branch filter (main page toggles as before)
+    # Apply branch filter (main page toggles)
     df = df_all.copy()
     if "BranchName" in df.columns:
         prev_sel = tuple(st.session_state.get("selected_branches", []))
@@ -635,7 +654,7 @@ def main():
             st.warning("No rows after branch filter.")
             st.stop()
 
-    # --- Date filter (unchanged) ---
+    # --- Date filter ---
     if "Date" in df.columns and df["Date"].notna().any():
         dmin = df["Date"].min().date()
         dmax = df["Date"].max().date()
@@ -727,7 +746,7 @@ def main():
             buf = io.BytesIO()
             with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
                 df.to_excel(writer, sheet_name="All Branches", index=False)
-                if "branch_performance" in k:
+                if "branch_performance" in k and isinstance(k["branch_performance"], pd.DataFrame):
                     k["branch_performance"].to_excel(writer, sheet_name="Branch Summary")
             st.download_button(
                 "📊 Download Excel Report",
@@ -748,5 +767,8 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
-        st.error("❌ Application Error. Please adjust filters or refresh.")
+    except Exception as e:
+        # Show the real error while you finalize the sheet/publishing settings
+        st.exception(e)
+        # To hide details later, replace with:
+        # st.error("❌ Application Error. Please adjust filters or refresh.")
