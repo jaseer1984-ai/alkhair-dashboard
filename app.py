@@ -29,7 +29,7 @@ class Config:
     }
     TARGETS = {"sales_achievement": 95.0, "nob_achievement": 90.0, "abv_achievement": 90.0}
     SHOW_SUBTITLE = False
-    CARDS_PER_ROW = 3   # 3 cards per row
+    CARDS_PER_ROW = 3
 
 
 config = Config()
@@ -45,7 +45,9 @@ def apply_css():
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
         html, body, [data-testid="stAppViewContainer"] { font-family: 'Inter', sans-serif; }
-        .main .block-container { padding: 1.2rem 2rem; max-width: 1500px; }
+
+        /* widen main area a bit more */
+        .main .block-container { padding: 1rem 1.2rem; max-width: 1800px; } /* ← you can tweak */
 
         /* ---- HERO HEADER ---- */
         .hero { text-align:center; margin: 0 0 10px 0; }
@@ -65,10 +67,14 @@ def apply_css():
         [data-testid="stMetricValue"]{ font-size:clamp(16px,2.2vw,22px)!important; line-height:1.2!important; }
         [data-testid="stMetricLabel"]{ font-size:.85rem!important;color:#6b7280!important; }
 
+        /* make the 5 metric columns share width evenly & flush */
+        .metrics-row [data-testid="stHorizontalBlock"]{ display:flex; flex-wrap:nowrap; gap:12px; }
+        .metrics-row [data-testid="stHorizontalBlock"]>div{ flex:1 1 0!important; min-width:180px; }
+        @media (max-width: 880px){ .metrics-row [data-testid="stHorizontalBlock"]{ flex-wrap:wrap; } }
+
+        /* Branch cards */
         .card { background:#fcfcfc; border:1px solid #f1f5f9; border-radius:16px; padding:16px; height:100%; }
         .branch-card { display:flex; flex-direction:column; height:100%; position:relative; }
-
-        /* aligned figures inside cards */
         .branch-metrics{
           display:grid; grid-template-columns: repeat(3, 1fr);
           gap: 6px 12px; margin-top: 10px; text-align: center; align-items: center;
@@ -82,7 +88,7 @@ def apply_css():
         .pill.warn      { background:#fffbeb; color:#d97706; }
         .pill.danger    { background:#fef2f2; color:#dc2626; }
 
-        /* ---- Tabs (high-contrast & readable) ---- */
+        /* ---- Tabs (high-contrast) ---- */
         .stTabs [data-baseweb="tab-list"]{ gap:8px; border-bottom:none; }
         .stTabs [data-baseweb="tab"]{
           position:relative; border-radius:10px 10px 0 0 !important; padding:10px 18px !important;
@@ -102,15 +108,21 @@ def apply_css():
           background:linear-gradient(90deg,#ef4444,#f97316,#22c55e,#3b82f6);
         }
 
-        /* Sidebar */
-        [data-testid="stSidebar"]{ background:#f7f9fc; border-right:1px solid #e5e7eb; min-width:280px; max-width:320px; }
-        [data-testid="stSidebar"] .block-container { padding:18px 16px 20px; }
-        .sb-title{ display:flex; gap:10px; align-items:center; font-weight:900; font-size:1.05rem; }
-        .sb-subtle{ color:#6b7280; font-size:.85rem; margin:6px 0 12px; }
-        .sb-section{ font-size:.80rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; color:#64748b; margin:12px 4px 6px; }
+        /* Sidebar — narrower */
+        [data-testid="stSidebar"]{
+          background:#f7f9fc; border-right:1px solid #e5e7eb;
+          width: 240px; min-width: 220px; max-width: 240px;  /* ← you can tweak */
+        }
+        [data-testid="stSidebar"] .block-container { padding:18px 12px 20px; }
+        .sb-title{ display:flex; gap:10px; align-items:center; font-weight:900; font-size:1.02rem; }
+        .sb-subtle{ color:#6b7280; font-size:.82rem; margin:6px 0 12px; }
+        .sb-section{ font-size:.78rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; color:#64748b; margin:12px 4px 6px; }
         .sb-hr{ height:1px; background:#e5e7eb; margin:12px 0; border-radius:999px; }
+        /* make inputs fit the slimmer sidebar */
+        [data-testid="stSidebar"] button, 
+        [data-testid="stSidebar"] [data-baseweb="input"]{ width:100% !important; }
 
-        /* DataFrame: center headers only */
+        /* Center only headers of dataframes */
         .stDataFrame table thead tr th { text-align: center !important; }
 
         /* Responsive fixes */
@@ -118,10 +130,6 @@ def apply_css():
         [data-testid="stHorizontalBlock"]>div{ min-width:260px; flex:1 1 260px; }
         [data-testid="stPlotlyChart"], [data-testid="stDataFrame"]{ overflow:auto; }
         .js-plotly-plot, .plotly, .js-plotly-plot .plotly, .js-plotly-plot .main-svg { max-width:100%!important; }
-
-        @media (max-width: 820px){
-          .main .block-container { padding:.6rem .8rem; }
-        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -342,7 +350,6 @@ def _branch_color_by_name(name: str) -> str:
 
 
 def render_branch_cards(bp: pd.DataFrame):
-    """Render branch cards in a fixed grid of CARDS_PER_ROW per row, with aligned figures."""
     st.markdown("### 🏪 Branch Overview")
     if bp.empty:
         st.info("No branch summary available.")
@@ -375,7 +382,6 @@ def render_branch_cards(bp: pd.DataFrame):
                       </div>
                       <div style="margin-top:8px;font-size:.92rem;color:#6b7280">Overall score</div>
 
-                      <!-- aligned figures -->
                       <div class="branch-metrics">
                         <div>
                           <div class="label">Sales %</div>
@@ -398,16 +404,30 @@ def render_branch_cards(bp: pd.DataFrame):
 
 def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
     st.markdown("### 🏆 Overall Performance")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("💰 Total Sales", f"SAR {k.get('total_sales_actual',0):,.0f}", delta=f"vs Target: {k.get('overall_sales_percent',0):.1f}%")
+
+    # equal-width metric row
+    st.markdown('<div class="metrics-row">', unsafe_allow_html=True)
+    c1, c2, c3, c4, c5 = st.columns(5, gap="small")
+
+    c1.metric("💰 Total Sales", f"SAR {k.get('total_sales_actual',0):,.0f}",
+              delta=f"vs Target: {k.get('overall_sales_percent',0):.1f}%")
+
     variance_color = "normal" if k.get("total_sales_variance",0) >= 0 else "inverse"
-    c2.metric("📊 Sales Variance", f"SAR {k.get('total_sales_variance',0):,.0f}", delta=f"{k.get('overall_sales_percent',0)-100:+.1f}%", delta_color=variance_color)
+    c2.metric("📊 Sales Variance", f"SAR {k.get('total_sales_variance',0):,.0f}",
+              delta=f"{k.get('overall_sales_percent',0)-100:+.1f}%", delta_color=variance_color)
+
     nob_color = "normal" if k.get("overall_nob_percent",0) >= config.TARGETS['nob_achievement'] else "inverse"
-    c3.metric("🛍️ Total Baskets", f"{k.get('total_nob_actual',0):,.0f}", delta=f"Achievement: {k.get('overall_nob_percent',0):.1f}%", delta_color=nob_color)
+    c3.metric("🛍️ Total Baskets", f"{k.get('total_nob_actual',0):,.0f}",
+              delta=f"Achievement: {k.get('overall_nob_percent',0):.1f}%", delta_color=nob_color)
+
     abv_color = "normal" if k.get("overall_abv_percent",0) >= config.TARGETS['abv_achievement'] else "inverse"
-    c4.metric("💎 Avg Basket Value", f"SAR {k.get('avg_abv_actual',0):,.2f}", delta=f"vs Target: {k.get('overall_abv_percent',0):.1f}%", delta_color=abv_color)
+    c4.metric("💎 Avg Basket Value", f"SAR {k.get('avg_abv_actual',0):,.2f}",
+              delta=f"vs Target: {k.get('overall_abv_percent',0):.1f}%", delta_color=abv_color)
+
     score_color = "normal" if k.get("performance_score",0) >= 80 else "off"
-    c5.metric("⭐ Performance Score", f"{k.get('performance_score',0):.0f}/100", delta="Weighted Score", delta_color=score_color)
+    c5.metric("⭐ Performance Score", f"{k.get('performance_score',0):.0f}/100",
+              delta="Weighted Score", delta_color=score_color)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     if "branch_performance" in k and not k["branch_performance"].empty:
         render_branch_cards(k["branch_performance"])
@@ -422,7 +442,8 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
         )
         styler = (
             df_table.style
-            .format({"Sales %":"{:,.1f}","NOB %":"{:,.1f}","ABV %":"{:,.1f}","Sales (Actual)":"{:,.0f}","Sales (Target)":"{:,.0f}"})
+            .format({"Sales %":"{:,.1f}","NOB %":"{:,.1f}","ABV %":"{:,.1f}",
+                     "Sales (Actual)":"{:,.0f}","Sales (Target)":"{:,.0f}"})
             .set_table_styles([{"selector":"th","props":[("text-align","center")]}])
         )
         st.dataframe(styler, use_container_width=True)
@@ -521,25 +542,22 @@ def main():
         else:
             dmin_sb = dmax_sb = datetime.today().date()
 
-        # --- CLAMP cached dates to new bounds BEFORE rendering widgets (fix for your error) ---
+        # CLAMP cached dates before rendering widgets (prevents default out-of-range)
         sd_val = st.session_state.get("start_date", dmin_sb)
         ed_val = st.session_state.get("end_date",   dmax_sb)
-        # clamp to [dmin_sb, dmax_sb]
         sd_val = min(max(sd_val, dmin_sb), dmax_sb)
         ed_val = min(max(ed_val, dmin_sb), dmax_sb)
         if sd_val > ed_val:
-            sd_val, ed_val = dmin_sb, dmax_sb  # safe reset when range collapses
+            sd_val, ed_val = dmin_sb, dmax_sb
 
         st.markdown('<div class="sb-section">Custom Date</div>', unsafe_allow_html=True)
         _sd = st.date_input("Start:", value=sd_val, min_value=dmin_sb, max_value=dmax_sb, key="sb_sd")
         _ed = st.date_input("End:",   value=ed_val, min_value=dmin_sb, max_value=dmax_sb, key="sb_ed")
 
-        # store clamped values back
         st.session_state.start_date = min(max(_sd, dmin_sb), dmax_sb)
         st.session_state.end_date   = min(max(_ed, dmin_sb), dmax_sb)
         if st.session_state.start_date > st.session_state.end_date:
             st.session_state.start_date, st.session_state.end_date = dmin_sb, dmax_sb
-        # ---------------------------------------------------------------------
 
     # Hero header
     st.markdown(
