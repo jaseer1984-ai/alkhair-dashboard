@@ -29,7 +29,7 @@ class Config:
     }
     TARGETS = {"sales_achievement": 95.0, "nob_achievement": 90.0, "abv_achievement": 90.0}
     SHOW_SUBTITLE = False
-    CARDS_PER_ROW = 3
+    CARDS_PER_ROW = 3  # branch cards per row
 
 
 config = Config()
@@ -46,8 +46,8 @@ def apply_css():
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
         html, body, [data-testid="stAppViewContainer"] { font-family: 'Inter', sans-serif; }
 
-        /* widen main area a bit more */
-        .main .block-container { padding: 1rem 1.2rem; max-width: 1800px; } /* ← you can tweak */
+        /* Wider main area */
+        .main .block-container { padding: 1rem 1.2rem; max-width: 1800px; }
 
         /* ---- HERO HEADER ---- */
         .hero { text-align:center; margin: 0 0 10px 0; }
@@ -59,7 +59,7 @@ def apply_css():
         .hero-emoji { font-size:1.15em; }
         .subtitle { color:#6b7280; font-size:.95rem; margin-bottom:1rem; text-align:center; }
 
-        /* Metric tiles: centered + smaller numbers */
+        /* Metric tiles */
         [data-testid="metric-container"]{
           background:#fff!important;border-radius:16px!important;border:1px solid rgba(0,0,0,.06)!important;
           padding:16px!important;text-align:center!important;
@@ -67,7 +67,7 @@ def apply_css():
         [data-testid="stMetricValue"]{ font-size:clamp(16px,2.2vw,22px)!important; line-height:1.2!important; }
         [data-testid="stMetricLabel"]{ font-size:.85rem!important;color:#6b7280!important; }
 
-        /* make the 5 metric columns share width evenly & flush */
+        /* Equal, flush 5-column metric row */
         .metrics-row [data-testid="stHorizontalBlock"]{ display:flex; flex-wrap:nowrap; gap:12px; }
         .metrics-row [data-testid="stHorizontalBlock"]>div{ flex:1 1 0!important; min-width:180px; }
         @media (max-width: 880px){ .metrics-row [data-testid="stHorizontalBlock"]{ flex-wrap:wrap; } }
@@ -88,7 +88,7 @@ def apply_css():
         .pill.warn      { background:#fffbeb; color:#d97706; }
         .pill.danger    { background:#fef2f2; color:#dc2626; }
 
-        /* ---- Tabs (high-contrast) ---- */
+        /* ---- Tabs (readable/selected) ---- */
         .stTabs [data-baseweb="tab-list"]{ gap:8px; border-bottom:none; }
         .stTabs [data-baseweb="tab"]{
           position:relative; border-radius:10px 10px 0 0 !important; padding:10px 18px !important;
@@ -108,21 +108,23 @@ def apply_css():
           background:linear-gradient(90deg,#ef4444,#f97316,#22c55e,#3b82f6);
         }
 
-        /* Sidebar — narrower */
+        /* Sidebar — narrower + smaller buttons */
         [data-testid="stSidebar"]{
           background:#f7f9fc; border-right:1px solid #e5e7eb;
-          width: 240px; min-width: 220px; max-width: 240px;  /* ← you can tweak */
+          width: 240px; min-width: 220px; max-width: 240px;
         }
         [data-testid="stSidebar"] .block-container { padding:18px 12px 20px; }
         .sb-title{ display:flex; gap:10px; align-items:center; font-weight:900; font-size:1.02rem; }
         .sb-subtle{ color:#6b7280; font-size:.82rem; margin:6px 0 12px; }
         .sb-section{ font-size:.78rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; color:#64748b; margin:12px 4px 6px; }
         .sb-hr{ height:1px; background:#e5e7eb; margin:12px 0; border-radius:999px; }
-        /* make inputs fit the slimmer sidebar */
-        [data-testid="stSidebar"] button, 
-        [data-testid="stSidebar"] [data-baseweb="input"]{ width:100% !important; }
 
-        /* Center only headers of dataframes */
+        /* make all sidebar buttons compact (All/None/Refresh) */
+        [data-testid="stSidebar"] button{
+          padding:6px 8px !important; font-size:0.9rem !important; min-height:32px !important; border-radius:10px !important;
+        }
+
+        /* Center DF headers only */
         .stDataFrame table thead tr th { text-align: center !important; }
 
         /* Responsive fixes */
@@ -514,7 +516,7 @@ def main():
     if "selected_branches" not in st.session_state:
         st.session_state.selected_branches = list(all_branches)
 
-    # Sidebar: actions + branch checkboxes + date range
+    # Sidebar
     with st.sidebar:
         st.markdown('<div class="sb-title">📊 <span>AL KHAIR DASHBOARD</span></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-subtle">Filters affect all tabs.</div>', unsafe_allow_html=True)
@@ -535,14 +537,14 @@ def main():
                 sel.append(b)
         st.session_state.selected_branches = sel
 
-        # Date bounds based on current branch selection
+        # Date bounds based on branch filter
         df_for_bounds = df_all[df_all["BranchName"].isin(st.session_state.selected_branches)].copy() if st.session_state.selected_branches else df_all.copy()
         if "Date" in df_for_bounds.columns and df_for_bounds["Date"].notna().any():
             dmin_sb, dmax_sb = df_for_bounds["Date"].min().date(), df_for_bounds["Date"].max().date()
         else:
             dmin_sb = dmax_sb = datetime.today().date()
 
-        # CLAMP cached dates before rendering widgets (prevents default out-of-range)
+        # Clamp cached values before showing widgets
         sd_val = st.session_state.get("start_date", dmin_sb)
         ed_val = st.session_state.get("end_date",   dmax_sb)
         sd_val = min(max(sd_val, dmin_sb), dmax_sb)
@@ -569,9 +571,6 @@ def main():
         """,
         unsafe_allow_html=True,
     )
-    if config.SHOW_SUBTITLE and "Date" in df_all.columns and df_all["Date"].notna().any():
-        date_span = f"{df_all['Date'].min().date()} → {df_all['Date'].max().date()}"
-        st.markdown(f"<div class='subtitle'>Branches: {df_all['BranchName'].nunique()} • Rows: {len(df_all):,} • {date_span}</div>", unsafe_allow_html=True)
 
     # Apply filters
     df = df_all.copy()
@@ -582,10 +581,11 @@ def main():
         df = df.loc[mask].copy()
         if df.empty: st.warning("No rows in selected date range."); st.stop()
 
-    # Quick Insights
+    # Quick Insights (now includes Liquidity current-date line + 30d details)
     k = calc_kpis(df)
     with st.expander("⚡ Quick Insights", expanded=True):
         insights: List[str] = []
+
         if "branch_performance" in k and isinstance(k["branch_performance"], pd.DataFrame) and not k["branch_performance"].empty:
             bp = k["branch_performance"]
             try:
@@ -595,8 +595,42 @@ def main():
                 pass
             below = bp[bp["SalesPercent"] < config.TARGETS["sales_achievement"]].index.tolist()
             if below: insights.append("⚠️ Below 95% target: " + ", ".join(below))
+
         if k.get("total_sales_variance", 0) < 0:
             insights.append(f"🟥 Overall variance negative by SAR {abs(k['total_sales_variance']):,.0f}")
+
+        # ---- Liquidity current date + 30d analytics ----
+        if {"TotalLiquidity"}.issubset(df.columns):
+            dliq = df.dropna(subset=["Date","TotalLiquidity"]).copy()
+            if not dliq.empty:
+                by_date = dliq.groupby("Date", as_index=False)["TotalLiquidity"].sum().sort_values("Date")
+                last_date = by_date["Date"].max()
+                cur_val = float(by_date.loc[by_date["Date"] == last_date, "TotalLiquidity"].sum())
+                insights.append(f"💧 Liquidity (latest {last_date.date()}): SAR {cur_val:,.0f}")
+
+                # 30d trend, peak ↑/↓ day
+                last30 = by_date.tail(30)
+                if len(last30) >= 2:
+                    prev = float(last30["TotalLiquidity"].iloc[-2])
+                    if prev:
+                        trend = (float(last30["TotalLiquidity"].iloc[-1]) - prev) / prev * 100.0
+                        insights.append(f"📈 30-day trend: {trend:+.1f}%")
+
+                if not last30.empty:
+                    peak_day = last30.loc[last30["TotalLiquidity"].idxmax(), "Date"].date()
+                    trough_day = last30.loc[last30["TotalLiquidity"].idxmin(), "Date"].date()
+                    insights.append(f"📅 Max day (30d): {peak_day} • Min day (30d): {trough_day}")
+
+                if {"ChangeLiquidity","BranchName"}.issubset(df.columns):
+                    br = dliq.groupby("BranchName", as_index=False)["ChangeLiquidity"].sum()
+                    if not br.empty:
+                        up_row = br.loc[br["ChangeLiquidity"].idxmax()]
+                        down_row = br.loc[br["ChangeLiquidity"].idxmin()]
+                        if float(up_row["ChangeLiquidity"]) > 0:
+                            insights.append(f"🏦 Biggest ↑ branch: {up_row['BranchName']} — SAR {float(up_row['ChangeLiquidity']):,.0f}")
+                        if float(down_row["ChangeLiquidity"]) < 0:
+                            insights.append(f"🏦 Biggest ↓ branch: {down_row['BranchName']} — SAR {float(down_row['ChangeLiquidity']):,.0f}")
+
         st.markdown("\n".join(f"- {line}" for line in insights) if insights else "All metrics look healthy for the current selection.")
 
     # Tabs
