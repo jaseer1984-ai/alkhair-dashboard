@@ -18,6 +18,7 @@ class Config:
     PAGE_TITLE = "Al Khair Business Performance"
     LAYOUT = "wide"
     DEFAULT_PUBLISHED_URL = (
+        # You can leave output=csv; the loader now handles it or upgrades it to xlsx.
         "https://docs.google.com/spreadsheets/d/e/2PACX-1vRYrhOc1N4ipUj55mwiXSLC_Qsw0efmAzKhfhnWtVOV2tP9gLEs2VO3I91pF9kdgg/pub?output=csv"
     )
     BRANCHES = {
@@ -106,10 +107,14 @@ def apply_css():
 # =========================================
 # LOADERS / HELPERS
 # =========================================
-def _pubhtml_to_xlsx(url: str) -> str:
-    if "docs.google.com/spreadsheets/d/e/" in url:
-        return re.sub(r"/pubhtml(.*)$", "/pub?output=xlsx", url.strip())
-    return url
+def _normalize_gsheet_url(url: str) -> str:
+    """Normalize common Google Sheets publish URLs toward xlsx export when possible."""
+    u = url.strip()
+    # pubhtml → xlsx
+    u = re.sub(r"/pubhtml(\?.*)?$", "/pub?output=xlsx", u)
+    # output=csv → output=xlsx (keeps same base, supports multi-sheet export)
+    u = re.sub(r"output=csv(\b|$)", "output=xlsx", u)
+    return u
 
 
 def _parse_numeric(s: pd.Series) -> pd.Series:
@@ -121,17 +126,61 @@ def _parse_numeric(s: pd.Series) -> pd.Series:
 
 @st.cache_data(show_spinner=False)
 def load_workbook_from_gsheet(published_url: str) -> Dict[str, pd.DataFrame]:
-    url = _pubhtml_to_xlsx((published_url or config.DEFAULT_PUBLISHED_URL).strip())
-    r = requests.get(url, timeout=60)
-    r.raise_for_status()
-    xls = pd.ExcelFile(io.BytesIO(r.content))
-    sheets: Dict[str, pd.DataFrame] = {}
-    for sn in xls.sheet_names:
-        df = xls.parse(sn)
-        df = df.dropna(how="all").dropna(axis=1, how="all")
-        if not df.empty:
-            sheets[sn] = df
-    return sheets
+    """
+    Robust loader:
+      1) Try xlsx export (multi-sheet) — preferred
+      2) If that fails, try CSV export for a single sheet
+    """
+    raw_url = (published_url or config.DEFAULT_PUBLISHED_URL).strip()
+    try_order = []
+
+    # First try xlsx (normalize common variants)
+    try_order.append(_normalize_gsheet_url(raw_url))
+
+    # If user really wants CSV, try the raw URL as-is (single sheet)
+    if "output=csv" in raw_url:
+        try_order.append(raw_url)
+
+    last_err: Optional[Exception] = None
+    for url in try_order:
+        try:
+            r = requests.get(url, timeout=60)
+            r.raise_for_status()
+            content = r.content
+
+            # Heuristic: try Excel first
+            try:
+                xls = pd.ExcelFile(io.BytesIO(content))
+                sheets: Dict[str, pd.DataFrame] = {}
+                for sn in xls.sheet_names:
+                    df = xls.parse(sn)
+                    df = df.dropna(how="all").dropna(axis=1, how="all")
+                    if not df.empty:
+                        sheets[sn] = df
+                if sheets:
+                    return sheets
+                else:
+                    # If workbook parsed but every sheet empty, continue to next method/URL
+                    last_err = ValueError("Workbook parsed but all sheets are empty.")
+            except Exception:
+                # Not an Excel file (or corrupt) → try CSV
+                try:
+                    df = pd.read_csv(io.BytesIO(content))
+                    df = df.dropna(how="all").dropna(axis=1, how="all")
+                    if not df.empty:
+                        return {"Sheet1": df}
+                    last_err = ValueError("CSV parsed but is empty.")
+                except Exception as e_csv:
+                    last_err = e_csv
+                    continue
+        except Exception as e_req:
+            last_err = e_req
+            continue
+
+    # If we reached here, all attempts failed
+    err_msg = f"Failed to load Google Sheet. Last error: {type(last_err).__name__}: {last_err}"
+    st.error(err_msg)
+    return {}  # let caller handle no sheets
 
 
 def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -486,7 +535,7 @@ def main():
     # Load data first
     sheets_map = load_workbook_from_gsheet(config.DEFAULT_PUBLISHED_URL)
     if not sheets_map:
-        st.warning("No non-empty sheets found.")
+        st.warning("No non-empty sheets found. Check your published link/permissions or sheet content.")
         st.stop()
 
     df_all = process_branch_data(sheets_map)
@@ -748,5 +797,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
-        st.error("❌ Application Error. Please adjust filters or refresh.")
+    except Exception as e:
+        st.error(f"❌ Application Error: {type(e).__name__}: {e}")
