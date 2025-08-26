@@ -71,6 +71,7 @@ def apply_css():
         .stTabs [data-baseweb="tab"]:nth-child(1)[aria-selected="true"] { background: linear-gradient(135deg,#ef4444 0%,#f87171 100%) !important; border-color:#f87171 !important; }
         .stTabs [data-baseweb="tab"]:nth-child(2)[aria-selected="true"] { background: linear-gradient(135deg,#3b82f6 0%,#60a5fa 100%) !important; border-color:#60a5fa !important; }
         .stTabs [data-baseweb="tab"]:nth-child(3)[aria-selected="true"] { background: linear-gradient(135deg,#8b5cf6 0%,#a78bfa 100%) !important; border-color:#a78bfa !important; }
+        .stTabs [data-baseweb="tab"]:nth-child(4)[aria-selected="true"] { background: linear-gradient(135deg,#10b981 0%,#34d399 100%) !important; border-color:#34d399 !important; }
 
         /* Sidebar (desktop look) */
         [data-testid="stSidebar"] {
@@ -253,6 +254,200 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
         w += 25
     k["performance_score"] = (score / w * 100) if w > 0 else 0.0
     return k
+
+
+# =========================================
+# LIQUIDITY — new helpers (non-breaking)
+# =========================================
+def _find_first(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+    cols = {c.lower(): c for c in df.columns}
+    for name in candidates:
+        for c in cols:
+            if name in c:
+                return cols[c]
+    return None
+
+
+def process_liquidity_sheet(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """
+    Tries to parse a sheet named 'Liquidity' (case-insensitive).
+    Expected columns (flexible): Date, Bank/Account, Inflow, Outflow, Closing (or Balance).
+    """
+    # find liquidity sheet
+    liq_key = None
+    for k in excel_data.keys():
+        if k.strip().lower() == "liquidity":
+            liq_key = k
+            break
+    if liq_key is None:
+        return pd.DataFrame()
+
+    raw = excel_data[liq_key].copy()
+    if raw.empty:
+        return pd.DataFrame()
+
+    # standardize columns
+    orig_cols = raw.columns.astype(str)
+    raw.columns = orig_cols.str.strip()
+
+    # map likely columns
+    date_col = _find_first(raw, ["date"])
+    bank_col = _find_first(raw, ["bank", "account"])
+    inflow_col = _find_first(raw, ["inflow", "in"])
+    outflow_col = _find_first(raw, ["outflow", "out"])
+    closing_col = _find_first(raw, ["closing", "balance"])
+
+    # keep only existing
+    keep = [c for c in [date_col, bank_col, inflow_col, outflow_col, closing_col] if c is not None]
+    df = raw[keep].copy() if keep else pd.DataFrame()
+    if df.empty:
+        return pd.DataFrame()
+
+    # rename to canonical
+    rename_map = {}
+    if date_col: rename_map[date_col] = "Date"
+    if bank_col: rename_map[bank_col] = "Bank"
+    if inflow_col: rename_map[inflow_col] = "Inflow"
+    if outflow_col: rename_map[outflow_col] = "Outflow"
+    if closing_col: rename_map[closing_col] = "Closing"
+    df.rename(columns=rename_map, inplace=True)
+
+    # parse types
+    if "Date" in df:
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    for c in ["Inflow", "Outflow", "Closing"]:
+        if c in df:
+            df[c] = _parse_numeric(df[c])
+
+    # add NetFlow
+    if "Inflow" in df or "Outflow" in df:
+        df["NetFlow"] = df.get("Inflow", 0).fillna(0) - df.get("Outflow", 0).fillna(0)
+
+    # clean
+    df = df.dropna(subset=["Date"])
+    df = df.sort_values(["Date", "Bank"] if "Bank" in df else ["Date"]).reset_index(drop=True)
+    return df
+
+
+def liquidity_kpis(df: pd.DataFrame, start_date: datetime.date, end_date: datetime.date) -> Dict[str, Any]:
+    if df.empty:
+        return {}
+    f = df.copy()
+    if "Date" in f:
+        mask = (f["Date"].dt.date >= start_date) & (f["Date"].dt.date <= end_date)
+        f = f.loc[mask]
+
+    k: Dict[str, Any] = {}
+    k["total_inflow"]  = float(f.get("Inflow", pd.Series(dtype=float)).sum()) if "Inflow" in f else 0.0
+    k["total_outflow"] = float(f.get("Outflow", pd.Series(dtype=float)).sum()) if "Outflow" in f else 0.0
+    k["net_flow"]      = k["total_inflow"] - k["total_outflow"]
+
+    # latest closing (sum across banks on latest date)
+    if "Closing" in f and "Date" in f and not f.empty:
+        last_day = f["Date"].max()
+        k["latest_closing"] = float(f.loc[f["Date"] == last_day, "Closing"].sum())
+        k["latest_date"] = last_day.date()
+    else:
+        k["latest_closing"] = 0.0
+        k["latest_date"] = None
+
+    # negatives
+    if "Closing" in f:
+        k["days_negative"] = int((f.groupby("Date")["Closing"].sum() < 0).sum())
+    else:
+        k["days_negative"] = 0
+
+    return k
+
+
+def liquidity_charts(df: pd.DataFrame, start_date: datetime.date, end_date: datetime.date) -> Dict[str, go.Figure]:
+    figs: Dict[str, go.Figure] = {"closing": go.Figure(), "flows": go.Figure()}
+    if df.empty:
+        return figs
+
+    f = df.copy()
+    mask = (f["Date"].dt.date >= start_date) & (f["Date"].dt.date <= end_date)
+    f = f.loc[mask]
+    if f.empty:
+        return figs
+
+    # Closing over time (by Bank if present)
+    fig1 = go.Figure()
+    if "Closing" in f:
+        if "Bank" in f:
+            for bank in sorted(f["Bank"].dropna().unique()):
+                d = f[f["Bank"] == bank]
+                fig1.add_trace(
+                    go.Scatter(
+                        x=d["Date"], y=d["Closing"], mode="lines+markers", name=str(bank),
+                        hovertemplate="Date: %{x|%Y-%m-%d}<br>Closing: %{y:,.0f}<extra></extra>", line=dict(width=3)
+                    )
+                )
+        else:
+            d = f.groupby("Date", as_index=False)["Closing"].sum()
+            fig1.add_trace(
+                go.Scatter(
+                    x=d["Date"], y=d["Closing"], mode="lines+markers", name="Closing",
+                    hovertemplate="Date: %{x|%Y-%m-%d}<br>Closing: %{y:,.0f}<extra></extra>", line=dict(width=3)
+                )
+            )
+    fig1.update_layout(
+        title="Closing Balance Over Time",
+        height=420, showlegend=True, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+        xaxis_title="Date", yaxis_title="SAR"
+    )
+
+    # Flows stacked bars (Inflow vs Outflow)
+    fig2 = go.Figure()
+    if "Inflow" in f or "Outflow" in f:
+        daily = f.groupby("Date", as_index=False).agg({"Inflow":"sum" if "Inflow" in f else "min",
+                                                       "Outflow":"sum" if "Outflow" in f else "min"})
+        if "Inflow" in daily:
+            fig2.add_trace(go.Bar(x=daily["Date"], y=daily["Inflow"], name="Inflow"))
+        if "Outflow" in daily:
+            fig2.add_trace(go.Bar(x=daily["Date"], y=daily["Outflow"], name="Outflow"))
+    fig2.update_layout(
+        barmode="stack", title="Daily Inflows vs Outflows",
+        height=400, showlegend=True, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+        xaxis_title="Date", yaxis_title="SAR"
+    )
+
+    figs["closing"] = fig1
+    figs["flows"] = fig2
+    return figs
+
+
+def liquidity_tables(df: pd.DataFrame, start_date: datetime.date, end_date: datetime.date) -> Dict[str, pd.DataFrame]:
+    tbls: Dict[str, pd.DataFrame] = {}
+    if df.empty:
+        return tbls
+    f = df[(df["Date"].dt.date >= start_date) & (df["Date"].dt.date <= end_date)].copy()
+    if f.empty:
+        return tbls
+
+    if "Inflow" in f or "Outflow" in f or "Closing" in f:
+        daily = f.groupby("Date", as_index=False).agg({
+            **({"Inflow":"sum"} if "Inflow" in f else {}),
+            **({"Outflow":"sum"} if "Outflow" in f else {}),
+            **({"NetFlow":"sum"} if "NetFlow" in f else {}),
+            **({"Closing":"sum"} if "Closing" in f else {}),
+        }).sort_values("Date")
+        tbls["daily"] = daily
+
+    # latest snapshot by bank
+    if "Bank" in f and "Closing" in f:
+        last = f["Date"].max()
+        snap = f[f["Date"] == last].groupby("Bank", as_index=True).agg({
+            **({"Closing":"sum"} if "Closing" in f else {}),
+            **({"Inflow":"sum"} if "Inflow" in f else {}),
+            **({"Outflow":"sum"} if "Outflow" in f else {}),
+            **({"NetFlow":"sum"} if "NetFlow" in f else {}),
+        }).sort_values("Closing", ascending=False)
+        tbls["snapshot"] = snap
+
+    return tbls
 
 
 # =========================================
@@ -494,6 +689,9 @@ def main():
         st.error("Could not process data. Check column names and sheet structure.")
         st.stop()
 
+    # NEW: Liquidity sheet (optional)
+    liq_df = process_liquidity_sheet(sheets_map)  # <- non-breaking; empty if sheet missing
+
     # Bounds for sidebar presets (based on current branches, initially all)
     all_branches = sorted(df_all["BranchName"].dropna().unique()) if "BranchName" in df_all else []
     if "selected_branches" not in st.session_state:
@@ -692,7 +890,13 @@ def main():
             st.write("All metrics look healthy for the current selection.")
 
     # Tabs
-    t1, t2, t3 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "📥 Export"])
+    # (Added Liquidity tab conditionally to keep original order of first three tabs)
+    has_liquidity = not process_liquidity_sheet(sheets_map).empty
+    if has_liquidity:
+        t1, t2, t3, t4 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "📥 Export", "💧 Liquidity"])
+    else:
+        t1, t2, t3 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "📥 Export"])
+
     with t1:
         render_overview(df, k)
 
@@ -729,6 +933,9 @@ def main():
                 df.to_excel(writer, sheet_name="All Branches", index=False)
                 if "branch_performance" in k:
                     k["branch_performance"].to_excel(writer, sheet_name="Branch Summary")
+                # NEW: export Liquidity if available
+                if not liq_df.empty:
+                    liq_df.to_excel(writer, sheet_name="Liquidity", index=False)
             st.download_button(
                 "📊 Download Excel Report",
                 buf.getvalue(),
@@ -743,6 +950,37 @@ def main():
                 mime="text/csv",
                 use_container_width=True,
             )
+
+    # ------- NEW: Liquidity tab (optional) -------
+    if has_liquidity:
+        with t4:
+            st.markdown("### 💧 Liquidity Overview")
+            lk = liquidity_kpis(liq_df, st.session_state.start_date, st.session_state.end_date)
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("⬆️ Total Inflow", f"SAR {lk.get('total_inflow',0):,.0f}")
+            c2.metric("⬇️ Total Outflow", f"SAR {lk.get('total_outflow',0):,.0f}")
+            c3.metric("🔄 Net Flow", f"SAR {lk.get('net_flow',0):,.0f}")
+            latest_label = f"as of {lk.get('latest_date')}" if lk.get('latest_date') else ""
+            c4.metric("💼 Latest Closing", f"SAR {lk.get('latest_closing',0):,.0f}", latest_label)
+
+            st.markdown("#### Charts")
+            figs = liquidity_charts(liq_df, st.session_state.start_date, st.session_state.end_date)
+            st.plotly_chart(figs["closing"], use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(figs["flows"], use_container_width=True, config={"displayModeBar": False})
+
+            st.markdown("#### Tables")
+            tbls = liquidity_tables(liq_df, st.session_state.start_date, st.session_state.end_date)
+            if "daily" in tbls:
+                st.dataframe(
+                    tbls["daily"].style.format({"Inflow":"{:,.0f}", "Outflow":"{:,.0f}", "NetFlow":"{:,.0f}", "Closing":"{:,.0f}"}),
+                    use_container_width=True,
+                )
+            if "snapshot" in tbls:
+                st.markdown("**Latest Snapshot by Bank/Account**")
+                st.dataframe(
+                    tbls["snapshot"].style.format({"Inflow":"{:,.0f}", "Outflow":"{:,.0f}", "NetFlow":"{:,.0f}", "Closing":"{:,.0f}"}),
+                    use_container_width=True,
+                )
 
 
 if __name__ == "__main__":
