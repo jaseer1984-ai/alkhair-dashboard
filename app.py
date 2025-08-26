@@ -45,6 +45,7 @@ def apply_css():
         .title { font-weight:900; font-size:1.6rem; margin-bottom:.25rem; }
         .subtitle { color:#6b7280; font-size:.95rem; margin-bottom:1rem; }
 
+        /* Metric tiles */
         [data-testid="metric-container"] {
             background:#fff !important; border-radius:16px !important; border:1px solid rgba(0,0,0,.06)!important; padding:18px!important;
         }
@@ -55,6 +56,7 @@ def apply_css():
         .pill.warn      { background:#fffbeb; color:#d97706; }
         .pill.danger    { background:#fef2f2; color:#dc2626; }
 
+        /* Tabs */
         .stTabs [data-baseweb="tab-list"] { gap: 8px; border-bottom: none; }
         .stTabs [data-baseweb="tab"] {
           border-radius: 10px 10px 0 0 !important;
@@ -69,6 +71,7 @@ def apply_css():
         .stTabs [data-baseweb="tab"]:nth-child(3)[aria-selected="true"] { background: linear-gradient(135deg,#8b5cf6 0%,#a78bfa 100%) !important; border-color:#a78bfa !important; }
         .stTabs [data-baseweb="tab"]:nth-child(4)[aria-selected="true"] { background: linear-gradient(135deg,#10b981 0%,#34d399 100%) !important; border-color:#34d399 !important; }
 
+        /* Sidebar */
         [data-testid="stSidebar"] {
           background: #f7f9fc; border-right: 1px solid #e5e7eb; min-width: 280px; max-width: 320px;
         }
@@ -77,6 +80,14 @@ def apply_css():
         .sb-subtle { color:#6b7280; font-size:.85rem; margin:6px 0 12px; }
         .sb-section { font-size:.80rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; color:#64748b; margin:12px 4px 6px; }
         .sb-hr { height:1px; background:#e5e7eb; margin:12px 0; border-radius:999px; }
+
+        /* Liquidity metrics panel */
+        .liq-panel { background:#ffffff; border:1px solid #eef2f7; border-radius:16px; padding:16px; }
+        .liq-title { font-weight:900; font-size:1.1rem; display:flex; gap:.5rem; align-items:center; }
+        .liq-k { margin-top:10px; }
+        .liq-k .label { color:#6b7280; font-size:.85rem; margin-top:.5rem; }
+        .liq-k .value { font-weight:900; font-size:2rem; }
+        .subtle { color:#6b7280; font-size:.9rem; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -243,35 +254,99 @@ def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
                       legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"))
     return fig
 
-def _liquidity_line(df: pd.DataFrame) -> go.Figure:
-    if df.empty or "Date" not in df or "TotalLiquidity" not in df: return go.Figure()
-    d = df.dropna(subset=["Date","TotalLiquidity"]).copy().groupby(["Date","BranchName"], as_index=False)["TotalLiquidity"].sum()
-    fig = go.Figure(); palette = ["#3b82f6","#10b981","#f59e0b","#8b5cf6","#ef4444","#14b8a6"]
-    for i, br in enumerate(sorted(d["BranchName"].unique())):
-        dd = d[d["BranchName"] == br]
-        fig.add_trace(go.Scatter(x=dd["Date"], y=dd["TotalLiquidity"], name=br,
-                                 mode="lines+markers", line=dict(width=3, color=palette[i % len(palette)]),
-                                 hovertemplate=f"<b>{br}</b><br>%{{x|%Y-%m-%d}}<br>Liquidity: SAR %{{y:,.0f}}<extra></extra>"))
-    fig.update_layout(title="Total Liquidity (SAR)", height=430, showlegend=True,
-                      plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                      legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
-                      xaxis_title="Date", yaxis_title="Amount (SAR)")
+# ========= NEW: Liquidity Trend (Pic #1 style) =========
+def _liquidity_total_trend_fig(daily: pd.DataFrame, title: str = "Total Liquidity Trend") -> go.Figure:
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=daily["Date"],
+            y=daily["TotalLiquidity"],
+            mode="lines+markers",
+            line=dict(width=4, color="#3b82f6"),
+            marker=dict(size=6),
+            hovertemplate="Date: %{x|%b %d, %Y}<br>Liquidity: SAR %{y:,.0f}<extra></extra>",
+            name="Total Liquidity",
+        )
+    )
+    fig.update_layout(
+        title=title,
+        height=420,
+        showlegend=False,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        xaxis_title="Date",
+        yaxis_title="Liquidity (SAR)",
+    )
     return fig
 
-def _liquidity_change_bar(df: pd.DataFrame) -> go.Figure:
-    if df.empty or "Date" not in df or "ChangeLiquidity" not in df: return go.Figure()
-    d = df.dropna(subset=["Date","ChangeLiquidity"]).copy().groupby(["Date","BranchName"], as_index=False)["ChangeLiquidity"].sum()
-    fig = go.Figure(); palette = ["#ef4444","#3b82f6","#8b5cf6","#10b981","#f59e0b","#14b8a6"]
-    for i, br in enumerate(sorted(d["BranchName"].unique())):
-        dd = d[d["BranchName"] == br]
-        fig.add_trace(go.Bar(x=dd["Date"], y=dd["ChangeLiquidity"], name=br,
-                             marker=dict(color=palette[i % len(palette)]),
-                             hovertemplate=f"<b>{br}</b><br>%{{x|%Y-%m-%d}}<br>Change: SAR %{{y:,.0f}}<extra></extra>"))
-    fig.update_layout(barmode="group", title="Change in Liquidity (SAR) — Daily",
-                      height=430, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                      legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
-                      xaxis_title="Date", yaxis_title="Amount (SAR)")
-    return fig
+def _fmt(n: Optional[float]) -> str:
+    if n is None or np.isnan(n): return "—"
+    return f"{n:,.0f}"
+
+def render_liquidity_tab(df: pd.DataFrame):
+    """
+    Pic #1 layout only:
+      - Left: Total Liquidity line (aggregated across selected branches, last 30 points)
+      - Right: Metrics panel (Current, Trend vs previous point, and 30d Max/Min/Avg)
+    """
+    if df.empty or "Date" not in df or "TotalLiquidity" not in df:
+        st.info("Liquidity columns not found. Include 'TOTAL LIQUIDITY' in your sheet.")
+        return
+
+    d = df.dropna(subset=["Date", "TotalLiquidity"]).copy()
+    if d.empty:
+        st.info("No liquidity rows in the selected range.")
+        return
+
+    # Aggregate to daily total across selected branches/date range
+    daily = d.groupby("Date", as_index=False)["TotalLiquidity"].sum().sort_values("Date")
+
+    # Limit to last 30 dates (or fewer if not available)
+    last30 = daily.tail(30).copy()
+
+    current = float(last30["TotalLiquidity"].iloc[-1]) if len(last30) >= 1 else np.nan
+    prev = float(last30["TotalLiquidity"].iloc[-2]) if len(last30) >= 2 else np.nan
+    trend_pct = ((current - prev) / prev * 100.0) if (len(last30) >= 2 and prev not in [0, np.nan]) else np.nan
+
+    max_30 = float(last30["TotalLiquidity"].max()) if not last30.empty else np.nan
+    min_30 = float(last30["TotalLiquidity"].min()) if not last30.empty else np.nan
+    avg_30 = float(last30["TotalLiquidity"].mean()) if not last30.empty else np.nan
+
+    col_chart, col_metrics = st.columns([3, 1], gap="large")
+
+    with col_chart:
+        st.markdown("#### 🧪 Liquidity Trend Analysis")
+        st.plotly_chart(_liquidity_total_trend_fig(last30), use_container_width=True, config={"displayModeBar": False})
+
+    with col_metrics:
+        st.markdown(
+            """
+            <div class="liq-panel">
+              <div class="liq-title">📊 Liquidity Metrics</div>
+              <div class="liq-k">
+                <div class="label">Current</div>
+                <div class="value">{cur}</div>
+              </div>
+              <div class="liq-k">
+                <div class="label">Trend</div>
+                <div class="value">{trend}</div>
+              </div>
+              <div class="liq-k">
+                <div class="label">Statistics (30d)</div>
+                <div class="subtle">Max: {mx}</div>
+                <div class="subtle">Min: {mn}</div>
+                <div class="subtle">Avg: {avg}</div>
+              </div>
+            </div>
+            """.format(
+                cur=_fmt(current),
+                trend=("+" if (not np.isnan(trend_pct) and trend_pct >= 0) else "") + (f"{trend_pct:.1f}%" if not np.isnan(trend_pct) else "—"),
+                mx=_fmt(max_30),
+                mn=_fmt(min_30),
+                avg=_fmt(avg_30),
+            ),
+            unsafe_allow_html=True,
+        )
 
 # =========================================
 # RENDER HELPERS
@@ -346,30 +421,6 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
         st.markdown("### 📉 Branch Performance Comparison")
         st.plotly_chart(_branch_comparison_chart(bp), use_container_width=True, config={"displayModeBar": False})
 
-def render_liquidity_tab(df: pd.DataFrame):
-    need_cols = {"TotalLiquidity","ChangeLiquidity","PctChange"}
-    if not need_cols.issubset(set(df.columns)):
-        st.info("Liquidity columns not found. Please include 'TOTAL LIQUIDITY', 'Change in Liquidity', and '% of Change' in your sheet."); return
-    tl_total = float(df["TotalLiquidity"].sum(skipna=True))
-    chg_total = float(df["ChangeLiquidity"].sum(skipna=True))
-    pct_mean = float(df["PctChange"].replace([np.inf,-np.inf], np.nan).dropna().mean()) if "PctChange" in df else 0.0
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("💧 Total Liquidity (sum)", f"SAR {tl_total:,.0f}")
-    c2.metric("🔁 Total Change (sum)", f"SAR {chg_total:,.0f}", delta=f"{('+' if chg_total>=0 else '')}{chg_total:,.0f}")
-    c3.metric("📈 Avg % Change", f"{pct_mean:,.2f}%")
-    last_date = df["Date"].max() if "Date" in df and df["Date"].notna().any() else None
-    if last_date:
-        d_last = df[df["Date"] == last_date]
-        c4.metric("🗓 Latest Date", last_date.strftime("%Y-%m-%d"), delta=f"Rows: {len(d_last):,}")
-    st.plotly_chart(_liquidity_line(df), use_container_width=True, config={"displayModeBar": False})
-    st.plotly_chart(_liquidity_change_bar(df), use_container_width=True, config={"displayModeBar": False})
-    st.markdown("#### Detail")
-    show_cols = [c for c in ["Date","BranchName","Bank","Cash","TotalLiquidity","ChangeLiquidity","PctChange"] if c in df.columns]
-    tbl = df[show_cols].copy()
-    if "PctChange" in tbl.columns:
-        tbl["PctChange"] = tbl["PctChange"].map(lambda x: f"{x:,.2f}%" if pd.notna(x) else "")
-    st.dataframe(tbl.sort_values(["Date","BranchName"]) if "Date" in tbl else tbl, use_container_width=True)
-
 # =========================================
 # MAIN
 # =========================================
@@ -393,7 +444,7 @@ def main():
         st.markdown('<div class="sb-title">📊 <span>AL KHAIR DASHBOARD</span></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-subtle">Filters affect all tabs.</div>', unsafe_allow_html=True)
 
-        # Actions (only Refresh; removed Reset button)
+        # Actions (only Refresh; removed Reset / Quick Range / Snapshot)
         st.markdown('<div class="sb-section">Actions</div>', unsafe_allow_html=True)
         if st.button("🔄 Refresh Data", use_container_width=True):
             load_workbook_from_gsheet.clear(); st.rerun()
@@ -433,8 +484,6 @@ def main():
         st.session_state.end_date   = max(dmin_sb, min(_ed, dmax_sb))
         if st.session_state.start_date > st.session_state.end_date:
             st.session_state.start_date, st.session_state.end_date = dmin_sb, dmax_sb
-
-        # Removed: Reset Filters button, Quick Range radios, and Today's Snapshot card
 
     # Header
     st.markdown(f"<div class='title'>📊 {config.PAGE_TITLE}</div>", unsafe_allow_html=True)
@@ -476,23 +525,6 @@ def main():
             if not np.isnan(net_chg):
                 arrow = "↑" if net_chg > 0 else ("↓" if net_chg < 0 else "→")
                 insights.append(f"💧 Net liquidity movement: {arrow} SAR {net_chg:+,.0f}")
-            if "PctChange" in dliq.columns:
-                mean_pct = float(dliq["PctChange"].replace([np.inf,-np.inf], np.nan).dropna().mean())
-                if pd.notna(mean_pct): insights.append(f"📈 Avg % change in liquidity: {mean_pct:,.2f}%")
-            if "BranchName" in dliq.columns and dliq["BranchName"].notna().any():
-                by_branch = dliq.groupby("BranchName")["ChangeLiquidity"].sum()
-                if not by_branch.empty:
-                    top_br, top_val = by_branch.idxmax(), float(by_branch.max())
-                    if pd.notna(top_val) and top_val > 0: insights.append(f"🏦 Biggest ↑ by branch: {top_br} — SAR {top_val:,.0f}")
-                    bot_br, bot_val = by_branch.idxmin(), float(by_branch.min())
-                    if pd.notna(bot_val) and bot_val < 0: insights.append(f"🏦 Biggest ↓ by branch: {bot_br} — SAR {bot_val:,.0f}")
-            if "Date" in dliq.columns and dliq["Date"].notna().any():
-                by_date = dliq.groupby("Date")["ChangeLiquidity"].sum()
-                if not by_date.empty:
-                    peak_day, peak_val = by_date.idxmax(), float(by_date.max())
-                    if pd.notna(peak_val) and peak_val > 0: insights.append(f"📅 Peak ↑ day: {peak_day.date()} — SAR {peak_val:,.0f}")
-                    trough_day, trough_val = by_date.idxmin(), float(by_date.min())
-                    if pd.notna(trough_val) and trough_val < 0: insights.append(f"📅 Peak ↓ day: {trough_day.date()} — SAR {trough_val:,.0f}")
         if insights:
             for it in insights: st.markdown("- " + it)
         else:
@@ -502,6 +534,7 @@ def main():
     t1, t2, t3, t4 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "💧 Liquidity", "📥 Export"])
     with t1:
         render_overview(df, k)
+
     with t2:
         st.markdown("#### Choose Metric")
         m1, m2, m3 = st.tabs(["💰 Sales", "🛍️ NOB", "💎 ABV"])
@@ -524,8 +557,11 @@ def main():
         with m3:
             st.plotly_chart(_metric_area(f, "ABVActual", "Average Basket Value (Actual vs Target)"),
                             use_container_width=True, config={"displayModeBar": False})
+
     with t3:
+        # NEW: Only the Pic #1 style report
         render_liquidity_tab(df)
+
     with t4:
         if df.empty:
             st.info("No data to export.")
