@@ -136,21 +136,6 @@ def apply_enhanced_css():
             border-radius: 50%;
         }
 
-        [data-testid="metric-container"] > div > div:first-child {
-            font-family: 'Poppins', sans-serif !important;
-            font-weight: 700 !important;
-            font-size: 2rem !important;
-            color: var(--text-primary) !important;
-        }
-
-        [data-testid="metric-container"] > div > div:nth-child(2) {
-            color: var(--text-secondary) !important;
-            font-weight: 500 !important;
-            text-transform: uppercase !important;
-            letter-spacing: 0.05em !important;
-            font-size: 0.85rem !important;
-        }
-
         /* Enhanced Cards */
         .enhanced-card {
             background: var(--bg-secondary);
@@ -296,15 +281,6 @@ def apply_enhanced_css():
             animation: fadeIn 1s ease-out;
         }
 
-        .chart-title {
-            font-family: 'Poppins', sans-serif;
-            font-weight: 700;
-            font-size: 1.4rem;
-            color: var(--text-primary);
-            margin-bottom: 24px;
-            text-align: center;
-        }
-
         /* Liquidity Panel */
         .liquidity-panel-enhanced {
             background: var(--bg-secondary);
@@ -447,7 +423,7 @@ def apply_enhanced_css():
 
 
 # =========================================
-# LOADERS / HELPERS (SAME AS ORIGINAL)
+# DATA LOADING FUNCTIONS
 # =========================================
 def _normalize_gsheet_url(url: str) -> str:
     u = (url or "").strip()
@@ -586,9 +562,9 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
 
 
 # =========================================
-# ENHANCED CHARTS
+# CHART FUNCTIONS
 # =========================================
-def _enhanced_metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool = True) -> go.Figure:
+def _enhanced_metric_area(df: pd.DataFrame, y_col: str, title: str, show_target: bool = True) -> go.Figure:
     if df.empty or "Date" not in df.columns or df["Date"].isna().all():
         return go.Figure()
 
@@ -608,7 +584,8 @@ def _enhanced_metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_targ
         color = palette[i % len(palette)]
         fig.add_trace(
             go.Scatter(
-                x=d_actual["Date"], y=d_actual[y_col],
+                x=d_actual["Date"], 
+                y=d_actual[y_col],
                 name=f"{br} - Actual",
                 mode="lines+markers",
                 line=dict(width=3, color=color),
@@ -621,7 +598,8 @@ def _enhanced_metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_targ
             d_target = daily_target[daily_target["BranchName"] == br]
             fig.add_trace(
                 go.Scatter(
-                    x=d_target["Date"], y=d_target[target_col],
+                    x=d_target["Date"], 
+                    y=d_target[target_col],
                     name=f"{br} - Target",
                     mode="lines",
                     line=dict(width=2, color=color, dash="dash"),
@@ -658,7 +636,8 @@ def _enhanced_branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
         y = bp[col].tolist()
         fig.add_trace(
             go.Bar(
-                x=x, y=y,
+                x=x, 
+                y=y,
                 name=label,
                 marker=dict(
                     color=colors[i % len(colors)],
@@ -713,10 +692,9 @@ def _enhanced_liquidity_trend_fig(daily: pd.DataFrame, title: str = "Total Liqui
 
 
 # =========================================
-# ENHANCED RENDERING FUNCTIONS
+# RENDERING FUNCTIONS
 # =========================================
 def render_enhanced_hero():
-    """Enhanced hero section with modern styling"""
     st.markdown(
         """
         <div class="hero-enhanced">
@@ -732,8 +710,14 @@ def render_enhanced_hero():
     )
 
 
+def _branch_color_by_name(name: str) -> str:
+    for _, meta in config.BRANCHES.items():
+        if meta.get("name") == name:
+            return meta.get("color", "#6b7280")
+    return "#6b7280"
+
+
 def render_enhanced_branch_cards(bp: pd.DataFrame):
-    """Enhanced branch cards with modern styling and animations"""
     st.markdown("### 🏪 Branch Overview")
     if bp.empty:
         st.info("No branch summary available.")
@@ -749,7 +733,6 @@ def render_enhanced_branch_cards(bp: pd.DataFrame):
                     r = bp.loc[br]
                     avg_pct = float(np.nanmean([r.get("SalesPercent", 0), r.get("NOBPercent", 0), r.get("ABVPercent", 0)]) or 0)
                     
-                    # Determine status class
                     if avg_pct >= 95:
                         status_class = "excellent"
                     elif avg_pct >= 85:
@@ -789,7 +772,6 @@ def render_enhanced_branch_cards(bp: pd.DataFrame):
 
 
 def render_enhanced_liquidity_tab(df: pd.DataFrame):
-    """Enhanced liquidity tab with modern styling"""
     if df.empty or "Date" not in df or "TotalLiquidity" not in df:
         st.info("Liquidity columns not found. Include 'TOTAL LIQUIDITY' in your sheet.")
         return
@@ -814,7 +796,7 @@ def render_enhanced_liquidity_tab(df: pd.DataFrame):
 
     with col_chart:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown('<div class="chart-title">💧 Liquidity Trend Analysis</div>', unsafe_allow_html=True)
+        st.markdown('<div style="font-family: Poppins, sans-serif; font-weight: 700; font-size: 1.4rem; color: var(--text-primary); margin-bottom: 24px; text-align: center;">💧 Liquidity Trend Analysis</div>', unsafe_allow_html=True)
         st.plotly_chart(_enhanced_liquidity_trend_fig(last30), use_container_width=True, config={"displayModeBar": False})
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -865,12 +847,10 @@ def render_enhanced_liquidity_tab(df: pd.DataFrame):
 
 
 def render_enhanced_overview(df: pd.DataFrame, k: Dict[str, Any]):
-    """Enhanced overview section with modern metrics"""
     st.markdown("### 🏆 Overall Performance")
     
     c1, c2, c3, c4, c5 = st.columns(5, gap="medium")
     
-    # Enhanced metrics with better formatting
     with c1:
         variance_color = "normal" if k.get("overall_sales_percent", 0) >= config.TARGETS["sales_achievement"] else "inverse"
         st.metric(
@@ -916,11 +896,9 @@ def render_enhanced_overview(df: pd.DataFrame, k: Dict[str, Any]):
             delta_color=score_color
         )
 
-    # Enhanced branch cards
     if "branch_performance" in k and not k["branch_performance"].empty:
         render_enhanced_branch_cards(k["branch_performance"])
 
-    # Enhanced comparison table
     if "branch_performance" in k and not k["branch_performance"].empty:
         st.markdown("### 📊 Performance Analysis")
         
@@ -939,7 +917,6 @@ def render_enhanced_overview(df: pd.DataFrame, k: Dict[str, Any]):
             .round(1)
         )
         
-        # Enhanced styling for the dataframe
         st.markdown('<div style="margin: 20px 0;">', unsafe_allow_html=True)
         st.dataframe(
             df_table.style.format({
@@ -953,22 +930,12 @@ def render_enhanced_overview(df: pd.DataFrame, k: Dict[str, Any]):
         )
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Enhanced comparison chart
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
         st.plotly_chart(_enhanced_branch_comparison_chart(bp), use_container_width=True, config={"displayModeBar": False})
         st.markdown('</div>', unsafe_allow_html=True)
 
 
-def _branch_color_by_name(name: str) -> str:
-    """Get branch color by name"""
-    for _, meta in config.BRANCHES.items():
-        if meta.get("name") == name:
-            return meta.get("color", "#6b7280")
-    return "#6b7280"
-
-
 def render_enhanced_sidebar(df_all: pd.DataFrame, all_branches: List[str]):
-    """Enhanced sidebar with modern styling"""
     with st.sidebar:
         st.markdown(
             """
@@ -980,7 +947,6 @@ def render_enhanced_sidebar(df_all: pd.DataFrame, all_branches: List[str]):
             unsafe_allow_html=True,
         )
 
-        # Actions section
         st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
         st.markdown('<div class="sidebar-section-title">⚡ Quick Actions</div>', unsafe_allow_html=True)
         
@@ -994,7 +960,6 @@ def render_enhanced_sidebar(df_all: pd.DataFrame, all_branches: List[str]):
                 st.session_state.active_tab = "Export"
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Branch selection
         st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
         st.markdown('<div class="sidebar-section-title">🏪 Branch Selection</div>', unsafe_allow_html=True)
         
@@ -1019,7 +984,6 @@ def render_enhanced_sidebar(df_all: pd.DataFrame, all_branches: List[str]):
         st.session_state.selected_branches = sel
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Date range selection
         df_for_bounds = df_all[df_all["BranchName"].isin(st.session_state.selected_branches)].copy() if st.session_state.selected_branches else df_all.copy()
         if "Date" in df_for_bounds.columns and df_for_bounds["Date"].notna().any():
             dmin_sb = df_for_bounds["Date"].min().date()
@@ -1035,7 +999,6 @@ def render_enhanced_sidebar(df_all: pd.DataFrame, all_branches: List[str]):
         st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
         st.markdown('<div class="sidebar-section-title">📅 Date Range</div>', unsafe_allow_html=True)
         
-        # Quick date range buttons
         col1, col2, col3 = st.columns(3)
         today = datetime.today().date()
         
@@ -1064,7 +1027,6 @@ def render_enhanced_sidebar(df_all: pd.DataFrame, all_branches: List[str]):
             st.session_state.start_date, st.session_state.end_date = dmin_sb, dmax_sb
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Data summary
         st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
         st.markdown('<div class="sidebar-section-title">📈 Data Summary</div>', unsafe_allow_html=True)
         
@@ -1091,16 +1053,13 @@ def render_enhanced_sidebar(df_all: pd.DataFrame, all_branches: List[str]):
 # MAIN FUNCTION
 # =========================================
 def main():
-    # Apply enhanced CSS
     apply_enhanced_css()
 
-    # Initialize session state
     if "selected_branches" not in st.session_state:
         st.session_state.selected_branches = []
     if "active_tab" not in st.session_state:
         st.session_state.active_tab = "Overview"
 
-    # Load data
     try:
         sheets_map = load_workbook_from_gsheet(config.DEFAULT_PUBLISHED_URL)
         if not sheets_map:
@@ -1116,18 +1075,13 @@ def main():
         st.error(f"❌ Error loading data: {str(e)}")
         st.stop()
 
-    # Get all branches
     all_branches = sorted(df_all["BranchName"].dropna().unique()) if "BranchName" in df_all else []
     if not st.session_state.selected_branches:
         st.session_state.selected_branches = list(all_branches)
 
-    # Render enhanced sidebar
     render_enhanced_sidebar(df_all, all_branches)
-
-    # Render enhanced hero
     render_enhanced_hero()
 
-    # Apply filters
     df = df_all.copy()
     if "BranchName" in df.columns and st.session_state.selected_branches:
         df = df[df["BranchName"].isin(st.session_state.selected_branches)].copy()
@@ -1138,14 +1092,11 @@ def main():
             st.warning("⚠️ No rows in selected date range. Please adjust your filters.")
             st.stop()
 
-    # Calculate KPIs
     k = calc_kpis(df)
 
-    # Quick insights expander with enhanced styling
     with st.expander("⚡ Quick Insights & Alerts", expanded=True):
         insights: List[str] = []
         
-        # Performance insights
         if "branch_performance" in k and isinstance(k["branch_performance"], pd.DataFrame) and not k["branch_performance"].empty:
             bp = k["branch_performance"]
             if not bp["SalesPercent"].isna().all():
@@ -1157,23 +1108,19 @@ def main():
                 except Exception:
                     pass
             
-            # Target analysis
             below_target = bp[bp["SalesPercent"] < config.TARGETS["sales_achievement"]].index.tolist()
             if below_target:
                 insights.append(f"⚠️ **Below 95% Target**: {', '.join(below_target)}")
             
-            # NOB analysis
             low_nob = bp[bp["NOBPercent"] < config.TARGETS["nob_achievement"]].index.tolist()
             if low_nob:
                 insights.append(f"📦 **Low Basket Count**: {', '.join(low_nob)} below 90% NOB target")
 
-        # Overall performance insights
         if k.get("total_sales_variance", 0) < 0:
             insights.append(f"🟥 **Revenue Gap**: SAR {abs(k['total_sales_variance']):,.0f} below target ({k.get('overall_sales_percent', 0):.1f}%)")
         elif k.get("total_sales_variance", 0) > 0:
             insights.append(f"🟢 **Revenue Surplus**: SAR {k['total_sales_variance']:,.0f} above target ({k.get('overall_sales_percent', 0):.1f}%)")
         
-        # Performance score insights
         score = k.get("performance_score", 0)
         if score >= 90:
             insights.append(f"⭐ **Excellent Performance**: Overall score of {score:.0f}/100")
@@ -1190,7 +1137,6 @@ def main():
         else:
             st.success("✅ All metrics are performing well within expected ranges!")
 
-    # Enhanced Tabs
     tab1, tab2, tab3, tab4 = st.tabs([
         "🏠 Branch Overview", 
         "📈 Daily Trends", 
@@ -1204,7 +1150,6 @@ def main():
     with tab2:
         st.markdown("#### 📊 Performance Trends Analysis")
         
-        # Time period selector
         period_col, metric_col = st.columns([1, 3])
         
         with period_col:
@@ -1223,10 +1168,27 @@ def main():
             else:
                 filtered_df = df.copy()
         
-        # Metrics tabs
         m1, m2, m3 = st.tabs(["💰 Sales Performance", "🛍️ Basket Analysis", "💎 Value Analysis"])
         
         with m1:
+            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+            st.plotly_chart(
+                _enhanced_metric_area(filtered_df, "SalesActual", "Daily Sales Performance (Actual vs Target)"), 
+                use_container_width=True, 
+                config={"displayModeBar": False}
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+        with m2:
+            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+            st.plotly_chart(
+                _enhanced_metric_area(filtered_df, "NOBActual", "Number of Baskets (Actual vs Target)"), 
+                use_container_width=True, 
+                config={"displayModeBar": False}
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+        with m3:
             st.markdown('<div class="chart-container">', unsafe_allow_html=True)
             st.plotly_chart(
                 _enhanced_metric_area(filtered_df, "ABVActual", "Average Basket Value (Actual vs Target)"), 
@@ -1249,17 +1211,13 @@ def main():
             with col1:
                 st.markdown("#### 📊 Data Export")
                 
-                # Excel export with multiple sheets
                 buf = io.BytesIO()
                 with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
-                    # Main data
                     df.to_excel(writer, sheet_name="Raw Data", index=False)
                     
-                    # Branch performance summary
                     if "branch_performance" in k and isinstance(k["branch_performance"], pd.DataFrame):
                         k["branch_performance"].to_excel(writer, sheet_name="Branch Summary")
                     
-                    # KPIs summary
                     kpi_data = pd.DataFrame([{
                         "Metric": "Total Sales Actual",
                         "Value": k.get('total_sales_actual', 0),
@@ -1299,13 +1257,11 @@ def main():
             with col2:
                 st.markdown("#### 📋 Report Summary")
                 
-                # Generate summary report
                 report_date = datetime.now().strftime("%B %d, %Y at %I:%M %p")
                 date_range = f"{st.session_state.start_date} to {st.session_state.end_date}"
                 selected_branches_text = ", ".join(st.session_state.selected_branches) if st.session_state.selected_branches else "All branches"
                 
-                summary_text = f"""
-**Al Khair Performance Report**
+                summary_text = f"""**Al Khair Performance Report**
 Generated: {report_date}
 Date Range: {date_range}
 Branches: {selected_branches_text}
@@ -1320,7 +1276,7 @@ Branches: {selected_branches_text}
 • Total Records: {len(df):,}
 • Date Range: {(st.session_state.end_date - st.session_state.start_date).days + 1} days
 • Branches Analyzed: {len(st.session_state.selected_branches)}
-                """
+"""
                 
                 st.download_button(
                     "📋 Download Summary Report",
@@ -1331,20 +1287,18 @@ Branches: {selected_branches_text}
                     help="Text summary of key insights"
                 )
                 
-                # Show preview of summary
                 with st.expander("📖 Preview Summary Report", expanded=False):
                     st.text(summary_text)
 
-    # Footer
     st.markdown("---")
     st.markdown(
-        """
+        f"""
         <div style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; padding: 20px 0;">
             <strong>Al Khair Business Intelligence Dashboard</strong><br>
-            Last updated: {timestamp} • Data refreshed automatically from Google Sheets<br>
+            Last updated: {datetime.now().strftime("%B %d, %Y at %I:%M %p")} • Data refreshed automatically from Google Sheets<br>
             <em>Built with ❤️ using Streamlit & Plotly</em>
         </div>
-        """.format(timestamp=datetime.now().strftime("%B %d, %Y at %I:%M %p")),
+        """,
         unsafe_allow_html=True,
     )
 
@@ -1356,7 +1310,6 @@ if __name__ == "__main__":
         st.error(f"❌ An error occurred: {str(e)}")
         st.exception(e)
         
-        # Show helpful error information
         st.markdown("### 🔧 Troubleshooting Tips")
         st.markdown("""
         - **Data Loading Issues**: Check your Google Sheets URL and ensure it's publicly accessible
@@ -1366,22 +1319,3 @@ if __name__ == "__main__":
         
         **Need Help?** Check the sidebar for refresh options or contact your system administrator.
         """)
-(
-                _enhanced_metric_area(filtered_df, "SalesActual", "Daily Sales Performance (Actual vs Target)"), 
-                use_container_width=True, 
-                config={"displayModeBar": False}
-            )
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-        with m2:
-            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-            st.plotly_chart(
-                _enhanced_metric_area(filtered_df, "NOBActual", "Number of Baskets (Actual vs Target)"), 
-                use_container_width=True, 
-                config={"displayModeBar": False}
-            )
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-        with m3:
-            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-            st.plotly_chart
