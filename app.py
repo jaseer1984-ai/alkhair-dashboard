@@ -27,13 +27,14 @@ class Config:
         "Magnus - 107": {"name": "Magnus", "code": "107", "color": "#8b5cf6"},
     }
     TARGETS = {"sales_achievement": 95.0, "nob_achievement": 90.0, "abv_achievement": 90.0}
+    SHOW_SUBTITLE = False  # <- hide "Branches • Rows • Date range" line
 
 
 config = Config()
 st.set_page_config(page_title=config.PAGE_TITLE, layout=config.LAYOUT, initial_sidebar_state="expanded")
 
 # =========================================
-# CSS
+# CSS (with responsive fixes)
 # =========================================
 def apply_css():
     st.markdown(
@@ -41,13 +42,34 @@ def apply_css():
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
         html, body, [data-testid="stAppViewContainer"] { font-family: 'Inter', sans-serif; }
+
         .main .block-container { padding: 1.2rem 2rem; max-width: 1500px; }
-        .title { font-weight:900; font-size:1.6rem; margin-bottom:.25rem; }
-        .subtitle { color:#6b7280; font-size:.95rem; margin-bottom:1rem; }
+
+        /* ---- HERO HEADER ---- */
+        .hero { text-align:center; margin: 0 0 10px 0; }
+        .hero-bar {
+          width: min(1100px, 95%);
+          height: 18px; margin: 8px auto 18px;
+          border-radius: 14px;
+          background: linear-gradient(90deg, #3b82f6 0%, #4338ca 100%);
+          box-shadow: 0 12px 30px rgba(67,56,202,.25);
+        }
+        .hero-title {
+          font-weight: 900;
+          font-size: clamp(26px, 3.6vw, 42px); /* bigger + responsive */
+          letter-spacing: .2px;
+          color: #111827;
+          display: inline-flex; align-items: center; gap:.55rem;
+        }
+        .hero-emoji { font-size: 1.15em; }
+
+        /* Sub-title (we'll conditionally not render it in Python) */
+        .subtitle { color:#6b7280; font-size:.95rem; margin-bottom:1rem; text-align:center; }
 
         /* Metric tiles */
         [data-testid="metric-container"] {
-            background:#fff !important; border-radius:16px !important; border:1px solid rgba(0,0,0,.06)!important; padding:18px!important;
+            background:#fff !important; border-radius:16px !important;
+            border:1px solid rgba(0,0,0,.06)!important; padding:18px!important;
         }
         .card { background:#fcfcfc; border:1px solid #f1f5f9; border-radius:16px; padding:16px; height:100%; }
         .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-weight:700; font-size:.80rem; }
@@ -56,7 +78,7 @@ def apply_css():
         .pill.warn      { background:#fffbeb; color:#d97706; }
         .pill.danger    { background:#fef2f2; color:#dc2626; }
 
-        /* Tabs */
+        /* Tabs styling */
         .stTabs [data-baseweb="tab-list"] { gap: 8px; border-bottom: none; }
         .stTabs [data-baseweb="tab"] {
           border-radius: 10px 10px 0 0 !important;
@@ -88,6 +110,21 @@ def apply_css():
         .liq-k .label { color:#6b7280; font-size:.85rem; margin-top:.5rem; }
         .liq-k .value { font-weight:900; font-size:2rem; }
         .subtle { color:#6b7280; font-size:.9rem; }
+
+        /* -------- RESPONSIVE FIXES -------- */
+        /* 1) Let column rows wrap on small screens so tiles/charts don't get cut */
+        [data-testid="stHorizontalBlock"] { display:flex; flex-wrap: wrap; gap: 1rem; }
+        [data-testid="stHorizontalBlock"] > div { min-width: 260px; flex: 1 1 260px; }
+
+        /* 2) Plotly charts always fill container and never overflow */
+        [data-testid="stPlotlyChart"] { overflow-x: auto; }
+        .js-plotly-plot, .plotly, .js-plotly-plot .plotly, .js-plotly-plot .main-svg { max-width: 100% !important; }
+
+        /* 3) Smaller screens tweak padding and font sizes a bit */
+        @media (max-width: 820px) {
+          .main .block-container { padding: .6rem .8rem; }
+          .liq-k .value { font-size: 1.6rem; }
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -238,7 +275,8 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool 
     fig.update_layout(title=title, height=420, showlegend=True,
                       plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                       legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
-                      xaxis_title="Date", yaxis_title="Value")
+                      xaxis_title="Date", yaxis_title="Value", autosize=True,
+                      margin=dict(l=40,r=20,t=40,b=40))
     return fig
 
 def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
@@ -251,10 +289,11 @@ def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
     fig.update_layout(barmode="group", title="Branch Performance Comparison (%)",
                       xaxis_title="Branch", yaxis_title="Percent", height=400,
                       plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                      legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"))
+                      legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+                      autosize=True, margin=dict(l=40,r=20,t=40,b=40))
     return fig
 
-# ========= NEW: Liquidity Trend (Pic #1 style) =========
+# ========= Liquidity Trend (Pic #1 style) =========
 def _liquidity_total_trend_fig(daily: pd.DataFrame, title: str = "Total Liquidity Trend") -> go.Figure:
     fig = go.Figure()
     fig.add_trace(
@@ -276,6 +315,8 @@ def _liquidity_total_trend_fig(daily: pd.DataFrame, title: str = "Total Liquidit
         paper_bgcolor="rgba(0,0,0,0)",
         xaxis_title="Date",
         yaxis_title="Liquidity (SAR)",
+        autosize=True,
+        margin=dict(l=40,r=20,t=40,b=40)
     )
     return fig
 
@@ -284,11 +325,6 @@ def _fmt(n: Optional[float]) -> str:
     return f"{n:,.0f}"
 
 def render_liquidity_tab(df: pd.DataFrame):
-    """
-    Pic #1 layout only:
-      - Left: Total Liquidity line (aggregated across selected branches, last 30 points)
-      - Right: Metrics panel (Current, Trend vs previous point, and 30d Max/Min/Avg)
-    """
     if df.empty or "Date" not in df or "TotalLiquidity" not in df:
         st.info("Liquidity columns not found. Include 'TOTAL LIQUIDITY' in your sheet.")
         return
@@ -298,10 +334,7 @@ def render_liquidity_tab(df: pd.DataFrame):
         st.info("No liquidity rows in the selected range.")
         return
 
-    # Aggregate to daily total across selected branches/date range
     daily = d.groupby("Date", as_index=False)["TotalLiquidity"].sum().sort_values("Date")
-
-    # Limit to last 30 dates (or fewer if not available)
     last30 = daily.tail(30).copy()
 
     current = float(last30["TotalLiquidity"].iloc[-1]) if len(last30) >= 1 else np.nan
@@ -418,6 +451,7 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
         st.dataframe(df_table.style.format({"Sales %":"{:,.1f}","NOB %":"{:,.1f}","ABV %":"{:,.1f}",
                                             "Sales (Actual)":"{:,.0f}","Sales (Target)":"{:,.0f}"}),
                      use_container_width=True)
+
         st.markdown("### 📉 Branch Performance Comparison")
         st.plotly_chart(_branch_comparison_chart(bp), use_container_width=True, config={"displayModeBar": False})
 
@@ -444,14 +478,12 @@ def main():
         st.markdown('<div class="sb-title">📊 <span>AL KHAIR DASHBOARD</span></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-subtle">Filters affect all tabs.</div>', unsafe_allow_html=True)
 
-        # Actions (only Refresh; removed Reset / Quick Range / Snapshot)
         st.markdown('<div class="sb-section">Actions</div>', unsafe_allow_html=True)
         if st.button("🔄 Refresh Data", use_container_width=True):
             load_workbook_from_gsheet.clear(); st.rerun()
 
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
 
-        # Branch filter: manual checkboxes (with All / None)
         st.markdown('<div class="sb-section">Branches</div>', unsafe_allow_html=True)
         ca, cb = st.columns(2)
         if ca.button("All", use_container_width=True):
@@ -465,7 +497,6 @@ def main():
             if checked: sel.append(b)
         st.session_state.selected_branches = sel
 
-        # Date bounds depend on selected branches
         df_for_bounds = df_all[df_all["BranchName"].isin(st.session_state.selected_branches)].copy() \
                         if st.session_state.selected_branches else df_all.copy()
         if "Date" in df_for_bounds.columns and df_for_bounds["Date"].notna().any():
@@ -485,15 +516,25 @@ def main():
         if st.session_state.start_date > st.session_state.end_date:
             st.session_state.start_date, st.session_state.end_date = dmin_sb, dmax_sb
 
-    # Header
-    st.markdown(f"<div class='title'>📊 {config.PAGE_TITLE}</div>", unsafe_allow_html=True)
-    date_span = ""
-    if "Date" in df_all.columns and df_all["Date"].notna().any():
-        date_span = f"{df_all['Date'].min().date()} → {df_all['Date'].max().date()}"
+    # ===== HERO HEADER =====
     st.markdown(
-        f"<div class='subtitle'>Branches: {df_all['BranchName'].nunique() if 'BranchName' in df_all else 0} • Rows: {len(df_all):,} {('• ' + date_span) if date_span else ''}</div>",
+        f"""
+        <div class="hero">
+          <div class="hero-bar"></div>
+          <div class="hero-title"><span class="hero-emoji">📊</span>{config.PAGE_TITLE}</div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
+
+    # (Hidden) subtitle — leave it rendered only if you change SHOW_SUBTITLE to True
+    if config.SHOW_SUBTITLE and "Date" in df_all.columns and df_all["Date"].notna().any():
+        date_span = f"{df_all['Date'].min().date()} → {df_all['Date'].max().date()}"
+        st.markdown(
+            f"<div class='subtitle'>Branches: {df_all['BranchName'].nunique() if 'BranchName' in df_all else 0} • "
+            f"Rows: {len(df_all):,} • {date_span}</div>",
+            unsafe_allow_html=True,
+        )
 
     # Apply filters
     df = df_all.copy()
@@ -504,7 +545,7 @@ def main():
         df = df.loc[mask].copy()
         if df.empty: st.warning("No rows in selected date range."); st.stop()
 
-    # Quick Insights
+    # Quick Insights (short)
     k = calc_kpis(df)
     with st.expander("⚡ Quick Insights", expanded=True):
         insights: List[str] = []
@@ -520,15 +561,11 @@ def main():
         if k.get("total_sales_variance", 0) < 0:
             insights.append(f"🟥 Overall variance negative by SAR {abs(k['total_sales_variance']):,.0f}")
         if {"TotalLiquidity","ChangeLiquidity"}.issubset(df.columns):
-            dliq = df.copy()
-            net_chg = float(dliq["ChangeLiquidity"].sum(skipna=True))
+            net_chg = float(df["ChangeLiquidity"].sum(skipna=True))
             if not np.isnan(net_chg):
                 arrow = "↑" if net_chg > 0 else ("↓" if net_chg < 0 else "→")
                 insights.append(f"💧 Net liquidity movement: {arrow} SAR {net_chg:+,.0f}")
-        if insights:
-            for it in insights: st.markdown("- " + it)
-        else:
-            st.write("All metrics look healthy for the current selection.")
+        for it in insights: st.markdown("- " + it) if insights else st.write("All metrics look healthy.")
 
     # Tabs
     t1, t2, t3, t4 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "💧 Liquidity", "📥 Export"])
@@ -559,7 +596,6 @@ def main():
                             use_container_width=True, config={"displayModeBar": False})
 
     with t3:
-        # NEW: Only the Pic #1 style report
         render_liquidity_tab(df)
 
     with t4:
