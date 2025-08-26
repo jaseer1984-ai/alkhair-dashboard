@@ -136,6 +136,10 @@ def load_workbook_from_gsheet(published_url: str) -> Dict[str, pd.DataFrame]:
 
 
 def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """
+    Build the sales/NOB/ABV dataset from branch sheets ONLY.
+    Now explicitly skips the 'Liquidity' sheet to avoid conflicts.
+    """
     combined: List[pd.DataFrame] = []
     mapping = {
         "Date": "Date",
@@ -165,6 +169,12 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         "ABVPercent": "ABVPercent",
     }
     for sheet_name, df in excel_data.items():
+        # ✅ Skip Liquidity or any non-branch sheets not in BRANCHES
+        if sheet_name.strip().lower() == "liquidity":
+            continue
+        if sheet_name not in config.BRANCHES:
+            continue
+
         if df.empty:
             continue
         d = df.copy()
@@ -199,66 +209,7 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     return pd.concat(combined, ignore_index=True) if combined else pd.DataFrame()
 
 
-def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
-    if df.empty:
-        return {}
-    k: Dict[str, Any] = {}
-    k["total_sales_target"] = float(df.get("SalesTarget", pd.Series(dtype=float)).sum())
-    k["total_sales_actual"] = float(df.get("SalesActual", pd.Series(dtype=float)).sum())
-    k["total_sales_variance"] = k["total_sales_actual"] - k["total_sales_target"]
-    k["overall_sales_percent"] = (
-        k["total_sales_actual"] / k["total_sales_target"] * 100 if k["total_sales_target"] > 0 else 0.0
-    )
-    k["total_nob_target"] = float(df.get("NOBTarget", pd.Series(dtype=float)).sum())
-    k["total_nob_actual"] = float(df.get("NOBActual", pd.Series(dtype=float)).sum())
-    k["overall_nob_percent"] = (
-        k["total_nob_actual"] / k["total_nob_target"] * 100 if k["total_nob_target"] > 0 else 0.0
-    )
-    k["avg_abv_target"] = float(df.get("ABVTarget", pd.Series(dtype=float)).mean()) if "ABVTarget" in df else 0.0
-    k["avg_abv_actual"] = float(df.get("ABVActual", pd.Series(dtype=float)).mean()) if "ABVActual" in df else 0.0
-    k["overall_abv_percent"] = (
-        k["avg_abv_actual"] / k["avg_abv_target"] * 100 if "ABVTarget" in df and k["avg_abv_target"] > 0 else 0.0
-    )
-
-    if "BranchName" in df.columns:
-        k["branch_performance"] = (
-            df.groupby("BranchName")
-            .agg(
-                {
-                    "SalesTarget": "sum",
-                    "SalesActual": "sum",
-                    "SalesPercent": "mean",
-                    "NOBTarget": "sum",
-                    "NOBActual": "sum",
-                    "NOBPercent": "mean",
-                    "ABVTarget": "mean",
-                    "ABVActual": "mean",
-                    "ABVPercent": "mean",
-                }
-            )
-            .round(2)
-        )
-
-    if "Date" in df.columns and df["Date"].notna().any():
-        k["date_range"] = {"start": df["Date"].min(), "end": df["Date"].max(), "days": int(df["Date"].dt.date.nunique())}
-
-    score = w = 0.0
-    if k.get("overall_sales_percent", 0) > 0:
-        score += min(k["overall_sales_percent"] / 100, 1.2) * 40
-        w += 40
-    if k.get("overall_nob_percent", 0) > 0:
-        score += min(k["overall_nob_percent"] / 100, 1.2) * 35
-        w += 35
-    if k.get("overall_abv_percent", 0) > 0:
-        score += min(k["overall_abv_percent"] / 100, 1.2) * 25
-        w += 25
-    k["performance_score"] = (score / w * 100) if w > 0 else 0.0
-    return k
-
-
-# =========================================
-# LIQUIDITY — new helpers (non-breaking)
-# =========================================
+# ---------- LIQUIDITY HELPERS ----------
 def _find_first(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     cols = {c.lower(): c for c in df.columns}
     for name in candidates:
@@ -269,11 +220,7 @@ def _find_first(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
 
 
 def process_liquidity_sheet(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """
-    Tries to parse a sheet named 'Liquidity' (case-insensitive).
-    Expected columns (flexible): Date, Bank/Account, Inflow, Outflow, Closing (or Balance).
-    """
-    # find liquidity sheet
+    """Read the sheet named 'Liquidity' (case-insensitive)."""
     liq_key = None
     for k in excel_data.keys():
         if k.strip().lower() == "liquidity":
@@ -286,24 +233,19 @@ def process_liquidity_sheet(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame
     if raw.empty:
         return pd.DataFrame()
 
-    # standardize columns
-    orig_cols = raw.columns.astype(str)
-    raw.columns = orig_cols.str.strip()
+    raw.columns = raw.columns.astype(str).str.strip()
 
-    # map likely columns
     date_col = _find_first(raw, ["date"])
     bank_col = _find_first(raw, ["bank", "account"])
     inflow_col = _find_first(raw, ["inflow", "in"])
     outflow_col = _find_first(raw, ["outflow", "out"])
     closing_col = _find_first(raw, ["closing", "balance"])
 
-    # keep only existing
     keep = [c for c in [date_col, bank_col, inflow_col, outflow_col, closing_col] if c is not None]
     df = raw[keep].copy() if keep else pd.DataFrame()
     if df.empty:
         return pd.DataFrame()
 
-    # rename to canonical
     rename_map = {}
     if date_col: rename_map[date_col] = "Date"
     if bank_col: rename_map[bank_col] = "Bank"
@@ -312,18 +254,15 @@ def process_liquidity_sheet(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame
     if closing_col: rename_map[closing_col] = "Closing"
     df.rename(columns=rename_map, inplace=True)
 
-    # parse types
     if "Date" in df:
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
     for c in ["Inflow", "Outflow", "Closing"]:
         if c in df:
             df[c] = _parse_numeric(df[c])
 
-    # add NetFlow
     if "Inflow" in df or "Outflow" in df:
         df["NetFlow"] = df.get("Inflow", 0).fillna(0) - df.get("Outflow", 0).fillna(0)
 
-    # clean
     df = df.dropna(subset=["Date"])
     df = df.sort_values(["Date", "Bank"] if "Bank" in df else ["Date"]).reset_index(drop=True)
     return df
@@ -342,7 +281,6 @@ def liquidity_kpis(df: pd.DataFrame, start_date: datetime.date, end_date: dateti
     k["total_outflow"] = float(f.get("Outflow", pd.Series(dtype=float)).sum()) if "Outflow" in f else 0.0
     k["net_flow"]      = k["total_inflow"] - k["total_outflow"]
 
-    # latest closing (sum across banks on latest date)
     if "Closing" in f and "Date" in f and not f.empty:
         last_day = f["Date"].max()
         k["latest_closing"] = float(f.loc[f["Date"] == last_day, "Closing"].sum())
@@ -351,7 +289,6 @@ def liquidity_kpis(df: pd.DataFrame, start_date: datetime.date, end_date: dateti
         k["latest_closing"] = 0.0
         k["latest_date"] = None
 
-    # negatives
     if "Closing" in f:
         k["days_negative"] = int((f.groupby("Date")["Closing"].sum() < 0).sum())
     else:
@@ -371,7 +308,6 @@ def liquidity_charts(df: pd.DataFrame, start_date: datetime.date, end_date: date
     if f.empty:
         return figs
 
-    # Closing over time (by Bank if present)
     fig1 = go.Figure()
     if "Closing" in f:
         if "Bank" in f:
@@ -398,11 +334,12 @@ def liquidity_charts(df: pd.DataFrame, start_date: datetime.date, end_date: date
         xaxis_title="Date", yaxis_title="SAR"
     )
 
-    # Flows stacked bars (Inflow vs Outflow)
     fig2 = go.Figure()
     if "Inflow" in f or "Outflow" in f:
-        daily = f.groupby("Date", as_index=False).agg({"Inflow":"sum" if "Inflow" in f else "min",
-                                                       "Outflow":"sum" if "Outflow" in f else "min"})
+        daily = f.groupby("Date", as_index=False).agg({
+            **({"Inflow":"sum"} if "Inflow" in f else {}),
+            **({"Outflow":"sum"} if "Outflow" in f else {}),
+        })
         if "Inflow" in daily:
             fig2.add_trace(go.Bar(x=daily["Date"], y=daily["Inflow"], name="Inflow"))
         if "Outflow" in daily:
@@ -436,7 +373,6 @@ def liquidity_tables(df: pd.DataFrame, start_date: datetime.date, end_date: date
         }).sort_values("Date")
         tbls["daily"] = daily
 
-    # latest snapshot by bank
     if "Bank" in f and "Closing" in f:
         last = f["Date"].max()
         snap = f[f["Date"] == last].groupby("Bank", as_index=True).agg({
@@ -684,15 +620,16 @@ def main():
         st.warning("No non-empty sheets found.")
         st.stop()
 
+    # Branch data (now strictly from known branch sheets)
     df_all = process_branch_data(sheets_map)
     if df_all.empty:
-        st.error("Could not process data. Check column names and sheet structure.")
+        st.error("Could not process branch data. Check branch sheet names/columns.")
         st.stop()
 
-    # NEW: Liquidity sheet (optional)
-    liq_df = process_liquidity_sheet(sheets_map)  # <- non-breaking; empty if sheet missing
+    # Liquidity sheet (optional, safe)
+    liq_df = process_liquidity_sheet(sheets_map)
 
-    # Bounds for sidebar presets (based on current branches, initially all)
+    # Sidebar range bounds based on selected branches
     all_branches = sorted(df_all["BranchName"].dropna().unique()) if "BranchName" in df_all else []
     if "selected_branches" not in st.session_state:
         st.session_state.selected_branches = list(all_branches)
@@ -755,19 +692,25 @@ def main():
 
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
 
-        # Snapshot
         df_snap = df_for_bounds.copy()
         if "Date" in df_snap.columns and df_snap["Date"].notna().any():
             mask_snap = (df_snap["Date"].dt.date >= st.session_state.start_date) & (df_snap["Date"].dt.date <= st.session_state.end_date)
             df_snap = df_snap.loc[mask_snap]
-        snap = calc_kpis(df_snap)
+        from_numbers = {
+            "total_sales_actual": float(df_snap.get("SalesActual", pd.Series(dtype=float)).sum()) if not df_snap.empty else 0.0,
+            "overall_sales_percent": (
+                float(df_snap.get("SalesActual", pd.Series(dtype=float)).sum()) /
+                max(1.0, float(df_snap.get("SalesTarget", pd.Series(dtype=float)).sum())) * 100
+            ) if not df_snap.empty else 0.0,
+            "total_nob_actual": float(df_snap.get("NOBActual", pd.Series(dtype=float)).sum()) if not df_snap.empty else 0.0,
+        }
         st.markdown('<div class="sb-section">Today\'s Snapshot</div>', unsafe_allow_html=True)
         st.markdown(
             f"""
             <div class="sb-card">
-              <div>💰 <b>Sales:</b> SAR {snap.get('total_sales_actual',0):,.0f}</div>
-              <div>📊 <b>Variance:</b> {snap.get('overall_sales_percent',0)-100:+.1f}%</div>
-              <div>🛍️ <b>Baskets:</b> {snap.get('total_nob_actual',0):,.0f}</div>
+              <div>💰 <b>Sales:</b> SAR {from_numbers['total_sales_actual']:,.0f}</div>
+              <div>📊 <b>Variance:</b> {from_numbers['overall_sales_percent']-100:+.1f}%</div>
+              <div>🛍️ <b>Baskets:</b> {from_numbers['total_nob_actual']:,.0f}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -785,7 +728,7 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # ===== 📱 Mobile filter drawer (visible only on phones via CSS) =====
+    # ===== 📱 Mobile filter drawer =====
     st.markdown('<div class="mobile-only">', unsafe_allow_html=True)
     with st.expander("📱 Filters", expanded=False):
         preset_m = st.radio(
@@ -871,6 +814,55 @@ def main():
             st.stop()
 
     # KPIs + Quick insights
+    def calc_kpis(df_in: pd.DataFrame) -> Dict[str, Any]:
+        if df_in.empty:
+            return {}
+        k: Dict[str, Any] = {}
+        k["total_sales_target"] = float(df_in.get("SalesTarget", pd.Series(dtype=float)).sum())
+        k["total_sales_actual"] = float(df_in.get("SalesActual", pd.Series(dtype=float)).sum())
+        k["total_sales_variance"] = k["total_sales_actual"] - k["total_sales_target"]
+        k["overall_sales_percent"] = (
+            k["total_sales_actual"] / k["total_sales_target"] * 100 if k["total_sales_target"] > 0 else 0.0
+        )
+        k["total_nob_target"] = float(df_in.get("NOBTarget", pd.Series(dtype=float)).sum())
+        k["total_nob_actual"] = float(df_in.get("NOBActual", pd.Series(dtype=float)).sum())
+        k["overall_nob_percent"] = (
+            k["total_nob_actual"] / k["total_nob_target"] * 100 if k["total_nob_target"] > 0 else 0.0
+        )
+        k["avg_abv_target"] = float(df_in.get("ABVTarget", pd.Series(dtype=float)).mean()) if "ABVTarget" in df_in else 0.0
+        k["avg_abv_actual"] = float(df_in.get("ABVActual", pd.Series(dtype=float)).mean()) if "ABVActual" in df_in else 0.0
+        k["overall_abv_percent"] = (
+            k["avg_abv_actual"] / k["avg_abv_target"] * 100 if "ABVTarget" in df_in and k["avg_abv_target"] > 0 else 0.0
+        )
+        if "BranchName" in df_in.columns:
+            k["branch_performance"] = (
+                df_in.groupby("BranchName")
+                .agg(
+                    {
+                        "SalesTarget": "sum",
+                        "SalesActual": "sum",
+                        "SalesPercent": "mean",
+                        "NOBTarget": "sum",
+                        "NOBActual": "sum",
+                        "NOBPercent": "mean",
+                        "ABVTarget": "mean",
+                        "ABVActual": "mean",
+                        "ABVPercent": "mean",
+                    }
+                ).round(2)
+            )
+        if "Date" in df_in.columns and df_in["Date"].notna().any():
+            k["date_range"] = {"start": df_in["Date"].min(), "end": df_in["Date"].max(), "days": int(df_in["Date"].dt.date.nunique())}
+        score = w = 0.0
+        if k.get("overall_sales_percent", 0) > 0:
+            score += min(k["overall_sales_percent"] / 100, 1.2) * 40; w += 40
+        if k.get("overall_nob_percent", 0) > 0:
+            score += min(k["overall_nob_percent"] / 100, 1.2) * 35; w += 35
+        if k.get("overall_abv_percent", 0) > 0:
+            score += min(k["overall_abv_percent"] / 100, 1.2) * 25; w += 25
+        k["performance_score"] = (score / w * 100) if w > 0 else 0.0
+        return k
+
     k = calc_kpis(df)
     with st.expander("⚡ Quick Insights", expanded=True):
         insights: List[str] = []
@@ -889,9 +881,8 @@ def main():
         else:
             st.write("All metrics look healthy for the current selection.")
 
-    # Tabs
-    # (Added Liquidity tab conditionally to keep original order of first three tabs)
-    has_liquidity = not process_liquidity_sheet(sheets_map).empty
+    # Tabs (Liquidity tab added only if we actually have liq_df)
+    has_liquidity = not liq_df.empty
     if has_liquidity:
         t1, t2, t3, t4 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "📥 Export", "💧 Liquidity"])
     else:
@@ -933,8 +924,7 @@ def main():
                 df.to_excel(writer, sheet_name="All Branches", index=False)
                 if "branch_performance" in k:
                     k["branch_performance"].to_excel(writer, sheet_name="Branch Summary")
-                # NEW: export Liquidity if available
-                if not liq_df.empty:
+                if has_liquidity:
                     liq_df.to_excel(writer, sheet_name="Liquidity", index=False)
             st.download_button(
                 "📊 Download Excel Report",
@@ -951,7 +941,6 @@ def main():
                 use_container_width=True,
             )
 
-    # ------- NEW: Liquidity tab (optional) -------
     if has_liquidity:
         with t4:
             st.markdown("### 💧 Liquidity Overview")
@@ -986,5 +975,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
+    except Exception as e:
         st.error("❌ Application Error. Please adjust filters or refresh.")
+        # Show the real error to help debug instead of failing silently:
+        st.exception(e)
