@@ -189,7 +189,7 @@ def _parse_numeric(s: pd.Series) -> pd.Series:
 
 
 # =========================================
-# BRANCH (Sales/NOB/ABV) — unchanged logic
+# BRANCH (Sales/NOB/ABV)
 # =========================================
 def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     combined: List[pd.DataFrame] = []
@@ -221,7 +221,6 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         "ABVPercent": "ABVPercent",
     }
     for sheet_name, df in excel_data.items():
-        # skip liquidity sheet; keep only configured branch sheets
         if re.search(r"liquid", sheet_name, re.I):
             continue
         if sheet_name not in config.BRANCHES:
@@ -269,30 +268,52 @@ def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
 
 
 # =========================================
-# LIQUIDITY (focus on Total/Change/%)
+# LIQUIDITY — tolerant parser (handles merged title row)
 # =========================================
-def process_liquidity_report(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """
-    Flatten the Liquidity sheet (DATE + repeated block per branch):
-      ... | <Branch> Total Liquidity | Change in Liquidity | % of Change | ...
-    Output columns: Date | Branch | TotalLiquidity | ChangeLiquidity | PctChange
-    """
-    liq_key = None
-    for k in excel_data.keys():
-        if re.search(r"liquid", k, re.I):
-            liq_key = k
-            break
-    if not liq_key:
+def find_candidate_liquidity_sheets(excel_data: Dict[str, pd.DataFrame]) -> List[str]:
+    """Return sheet names most likely to be Liquidity."""
+    cands = []
+    for k, df in excel_data.items():
+        if df is None or df.empty:
+            continue
+        name_hit = bool(re.search(r"liquid|liq|cash|bank", k, re.I))
+        cols = [str(c) for c in df.columns]
+        has_date = any(re.search(r"\bdate\b", str(c), re.I) for c in cols)
+        has_total_liq = any(re.search(r"total\s*liquid", str(c), re.I) for c in cols)
+        if name_hit or (has_date and has_total_liq):
+            cands.append(k)
+    cands.sort(key=lambda x: (0 if re.search(r"liquid", x, re.I) else 1, x.lower()))
+    return cands
+
+def parse_liquidity_from_sheet(df_sheet: pd.DataFrame) -> pd.DataFrame:
+    """Parse ONE sheet into tidy liquidity rows with flexible headers and auto header-row detection."""
+    if df_sheet is None or df_sheet.empty:
         return pd.DataFrame()
 
-    raw = excel_data[liq_key].copy()
-    if raw.empty:
-        return pd.DataFrame()
+    raw = df_sheet.copy()
 
+    # --- AUTO HEADER FIX: if 'date' is not in column names, try to promote a lower row to header
+    cols_str = [str(c) for c in raw.columns]
+    has_date_in_cols = any(re.search(r"\bdate\b", c, re.I) for c in cols_str)
+
+    if not has_date_in_cols:
+        header_row_idx = None
+        max_check = min(10, len(raw))
+        for i in range(max_check):
+            row_vals = " | ".join([str(x) for x in raw.iloc[i].tolist()])
+            if re.search(r"\bdate\b", row_vals, re.I):
+                header_row_idx = i
+                break
+        if header_row_idx is not None:
+            new_header = raw.iloc[header_row_idx].astype(str).str.strip().tolist()
+            raw = raw.iloc[header_row_idx+1:].copy()
+            raw.columns = new_header
+
+    # Clean empties and strip
     raw = raw.dropna(how="all").dropna(axis=1, how="all")
     raw.columns = raw.columns.astype(str).str.strip()
 
-    # DATE column (anywhere)
+    # DATE column
     date_cols = [c for c in raw.columns if re.search(r"\bdate\b", c, re.I)]
     if not date_cols:
         return pd.DataFrame()
@@ -300,33 +321,36 @@ def process_liquidity_report(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFram
 
     cols = list(raw.columns)
 
-    # Anchor on every "Total Liquidity" header; then take next 2 columns for Change/% (tolerant to slight header text)
+    # Find any column that looks like "Total Liquidity"
     total_idxs = [i for i, c in enumerate(cols) if re.search(r"total\s*liquid", c, re.I)]
+    if not total_idxs:
+        total_idxs = [i for i, c in enumerate(cols) if re.search(r"liquid", c, re.I)]
+
     parts: List[pd.DataFrame] = []
 
-    # helper to clean branch name from header cell text
     def _branch_from_total(h: str) -> str:
-        s = re.sub(r"(?i)total\s*liquidity", "", str(h)).strip(" -|")
+        # e.g., "Al khair - 102 Total Liquidity" -> "Al khair - 102"
+        s = re.sub(r"(?i)total\s*liquidity", "", str(h)).strip(" -|:")
         return s if s else "Branch"
 
     for idx in total_idxs:
         total_col = cols[idx]
         change_col = cols[idx + 1] if idx + 1 < len(cols) else None
-        pct_col = cols[idx + 2] if idx + 2 < len(cols) else None
+        pct_col    = cols[idx + 2] if idx + 2 < len(cols) else None
 
-        # ensure we don't accidentally pick a blank/separator column
-        ok_change = bool(change_col) and re.search(r"change", change_col, re.I)
-        ok_pct = bool(pct_col) and (re.search(r"%|percent", pct_col, re.I) or re.search(r"of\s*change", pct_col, re.I))
+        ok_change = bool(change_col) and re.search(r"change", str(change_col), re.I)   # accepts "Change in Liquid"
+        ok_pct    = bool(pct_col) and (re.search(r"%", str(pct_col)) or re.search(r"percent|of\s*change", str(pct_col), re.I))
 
         take = [date_col, total_col]
         rename_map = {date_col: "Date", total_col: "TotalLiquidity"}
-
         if ok_change:
             take.append(change_col)  # type: ignore
             rename_map[change_col] = "ChangeLiquidity"  # type: ignore
         if ok_pct:
             take.append(pct_col)  # type: ignore
             rename_map[pct_col] = "PctChange"  # type: ignore
+
+        take = list(dict.fromkeys(take))  # guard duplicates
 
         sub = raw[take].copy()
         sub.rename(columns=rename_map, inplace=True)
@@ -366,7 +390,6 @@ def liquidity_kpis(df: pd.DataFrame, start_date, end_date) -> Dict[str, Any]:
     k["latest_change_sum"] = float(latest.get("ChangeLiquidity", pd.Series(dtype=float)).sum()) if "ChangeLiquidity" in latest else 0.0
     k["latest_pct_avg"] = float(latest.get("PctChange", pd.Series(dtype=float)).mean()) if "PctChange" in latest else np.nan
 
-    # Best branch by latest total
     top = latest.sort_values("TotalLiquidity", ascending=False).head(1)
     if not top.empty:
         k["top_branch"] = str(top["Branch"].iloc[0])
@@ -435,7 +458,7 @@ def liquidity_tables(df: pd.DataFrame, start_date, end_date) -> Dict[str, pd.Dat
 
 
 # =========================================
-# SALES CHART HELPERS (unchanged)
+# SALES CHART HELPERS
 # =========================================
 def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool = True) -> go.Figure:
     if df.empty or "Date" not in df.columns or df["Date"].isna().all():
@@ -518,7 +541,7 @@ def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
 
 
 # =========================================
-# RENDER HELPERS (unchanged)
+# RENDER HELPERS
 # =========================================
 def branch_status_class(pct: float) -> str:
     if pct >= 95:
@@ -615,10 +638,7 @@ def render_branch_filter_buttons(df: pd.DataFrame) -> List[str]:
     if not branches:
         return []
 
-    # default selection from session or all
     default_sel = st.session_state.get("selected_branches", branches)
-
-    # light chip-like multiselect
     selected = st.multiselect(
         "Filter branches",
         options=branches,
@@ -626,8 +646,6 @@ def render_branch_filter_buttons(df: pd.DataFrame) -> List[str]:
         key="branch_multiselect",
         help="Choose which branches to include in all charts & tables.",
     )
-
-    # keep session in sync
     st.session_state.selected_branches = selected if selected else branches
     return st.session_state.selected_branches
 
@@ -649,9 +667,6 @@ def main():
     if df_all.empty:
         st.error("Could not process branch data. Check branch sheet names and columns.")
         st.stop()
-
-    # Liquidity data
-    liq_df = process_liquidity_report(sheets_map)  # <- focuses on Total/Change/% only
 
     # Sidebar bounds
     all_branches = sorted(df_all["BranchName"].dropna().unique()) if "BranchName" in df_all else []
@@ -819,7 +834,7 @@ def main():
             st.warning("No rows in selected date range.")
             st.stop()
 
-    # KPIs and Quick Insights (same as before)
+    # KPIs and Quick Insights
     def calc_kpis(df_in: pd.DataFrame) -> Dict[str, Any]:
         if df_in.empty:
             return {}
@@ -869,7 +884,7 @@ def main():
         else:
             st.write("All metrics look healthy for the current selection.")
 
-    # ===== Tabs (Liquidity always visible) =====
+    # ===== Tabs =====
     t1, t2, t3, t4 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "📥 Export", "💧 Liquidity"])
 
     with t1:
@@ -908,8 +923,6 @@ def main():
                 df.to_excel(writer, sheet_name="All Branches", index=False)
                 if "branch_performance" in k:
                     k["branch_performance"].to_excel(writer, sheet_name="Branch Summary")
-                if not liq_df.empty:
-                    liq_df.to_excel(writer, sheet_name="Liquidity", index=False)
             st.download_button(
                 "📊 Download Excel Report",
                 buf.getvalue(),
@@ -927,35 +940,58 @@ def main():
 
     with t4:
         st.markdown("### 💧 Liquidity Report")
+
+        # Let user choose which sheet to parse (robust for merged title in row 1)
+        candidates = find_candidate_liquidity_sheets(sheets_map)
+        if not candidates:
+            st.info("No likely Liquidity sheets detected. Tip: include a 'Date' column and headers like '… Total Liquidity', 'Change …', '% of Change'.")
+            st.write("Available tabs:", list(sheets_map.keys()))
+            st.stop()
+
+        picked = st.selectbox("Select Liquidity sheet", options=candidates, index=0, key="liq_sheet_pick")
+        liq_df = parse_liquidity_from_sheet(sheets_map[picked])
+
         if liq_df.empty:
-            st.info("No Liquidity data parsed. Ensure the 'Liquidity' tab has columns like '… Total Liquidity | Change in Liquidity | % of Change' and the sheet is public. Then click 🔄 Refresh Data.")
-        else:
-            lk = liquidity_kpis(liq_df, st.session_state.start_date, st.session_state.end_date)
-            c1, c2, c3 = st.columns(3)
-            c1.metric("💼 Latest Total (sum)", f"SAR {lk.get('latest_total_sum',0):,.0f}", f"as of {lk.get('latest_date')}")
-            c2.metric("🔄 Latest Change (sum)", f"SAR {lk.get('latest_change_sum',0):,.0f}")
-            pct = lk.get("latest_pct_avg")
-            c3.metric("% Change (avg)", f"{pct:.1f}%" if pct==pct else "—")
+            st.warning("Couldn’t parse liquidity from the selected sheet. Quick checks below:")
+            with st.expander("Debug: preview headers & first rows"):
+                st.write([str(c) for c in sheets_map[picked].columns[:12]])
+                st.dataframe(sheets_map[picked].head(8), use_container_width=True)
+            st.markdown(
+                "- Ensure one row contains the real header with **DATE**.\n"
+                "- Branch blocks should have headers like **`<Branch> Total Liquidity`**.\n"
+                "- (Optional) The next columns at right can contain **Change** and **% of Change**."
+            )
+            st.stop()
 
-            st.markdown("#### Charts")
-            figs = liquidity_charts(liq_df, st.session_state.start_date, st.session_state.end_date)
-            st.plotly_chart(figs["total_trend"], use_container_width=True, config={"displayModeBar": False})
-            st.plotly_chart(figs["branch_trend"], use_container_width=True, config={"displayModeBar": False})
+        # KPIs
+        lk = liquidity_kpis(liq_df, st.session_state.start_date, st.session_state.end_date)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("💼 Latest Total (sum)", f"SAR {lk.get('latest_total_sum',0):,.0f}", f"as of {lk.get('latest_date')}")
+        c2.metric("🔄 Latest Change (sum)", f"SAR {lk.get('latest_change_sum',0):,.0f}")
+        pct = lk.get("latest_pct_avg")
+        c3.metric("% Change (avg)", f"{pct:.1f}%" if pct==pct else "—")
 
-            st.markdown("#### Tables")
-            tbls = liquidity_tables(liq_df, st.session_state.start_date, st.session_state.end_date)
-            if "daily_total" in tbls:
-                st.markdown("**Daily Total Liquidity (All Branches)**")
-                st.dataframe(
-                    tbls["daily_total"].style.format({"TotalLiquidity": "{:,.0f}"}),
-                    use_container_width=True
-                )
-            if "latest_by_branch" in tbls:
-                st.markdown("**Latest by Branch**")
-                st.dataframe(
-                    tbls["latest_by_branch"].style.format({"TotalLiquidity": "{:,.0f}"}),
-                    use_container_width=True
-                )
+        # Charts
+        st.markdown("#### Charts")
+        figs = liquidity_charts(liq_df, st.session_state.start_date, st.session_state.end_date)
+        st.plotly_chart(figs["total_trend"], use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(figs["branch_trend"], use_container_width=True, config={"displayModeBar": False})
+
+        # Tables
+        st.markdown("#### Tables")
+        tbls = liquidity_tables(liq_df, st.session_state.start_date, st.session_state.end_date)
+        if "daily_total" in tbls:
+            st.markdown("**Daily Total Liquidity (All Branches)**")
+            st.dataframe(
+                tbls["daily_total"].style.format({"TotalLiquidity": "{:,.0f}"}),
+                use_container_width=True
+            )
+        if "latest_by_branch" in tbls:
+            st.markdown("**Latest by Branch**")
+            st.dataframe(
+                tbls["latest_by_branch"].style.format({"TotalLiquidity": "{:,.0f}"}),
+                use_container_width=True
+            )
 
 
 # =========================
