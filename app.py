@@ -340,9 +340,29 @@ def apply_css():
 # ENHANCED DATA PROCESSING
 # =========================================
 def _pubhtml_to_xlsx(url: str) -> str:
-    """Convert Google Sheets pubhtml URL to xlsx download URL."""
+    """Convert Google Sheets URL to xlsx download URL with better handling."""
+    url = url.strip()
+    
+    # If it's already a CSV URL, convert to XLSX
+    if "pub?output=csv" in url:
+        return url.replace("pub?output=csv", "pub?output=xlsx")
+    
+    # If it's a pubhtml URL, convert to XLSX
+    if "pubhtml" in url:
+        return re.sub(r"/pubhtml(.*)$", "/pub?output=xlsx", url)
+    
+    # If it's a regular sharing URL, try to convert
+    if "/edit" in url:
+        # Extract the document ID and convert to publish URL
+        match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", url)
+        if match:
+            doc_id = match.group(1)
+            return f"https://docs.google.com/spreadsheets/d/{doc_id}/pub?output=xlsx"
+    
+    # If it contains the /e/ pattern, it's likely a published URL
     if "docs.google.com/spreadsheets/d/e/" in url:
-        return re.sub(r"/pubhtml(.*)$", "/pub?output=xlsx", url.strip())
+        return re.sub(r"(output=)[^&]*", r"\1xlsx", url)
+    
     return url
 
 def _parse_numeric(s: pd.Series) -> pd.Series:
@@ -364,33 +384,107 @@ def _parse_numeric(s: pd.Series) -> pd.Series:
 def load_workbook_from_gsheet(published_url: str) -> Dict[str, pd.DataFrame]:
     """Load Excel workbook from Google Sheets with enhanced error handling."""
     try:
-        url = _pubhtml_to_xlsx((published_url or config.DEFAULT_PUBLISHED_URL).strip())
-        logger.info(f"Loading data from: {url}")
+        original_url = (published_url or config.DEFAULT_PUBLISHED_URL).strip()
+        logger.info(f"Original URL: {original_url}")
         
         with st.spinner("🔄 Loading data from Google Sheets..."):
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
+            # Try different URL formats
+            urls_to_try = []
             
-            xls = pd.ExcelFile(io.BytesIO(response.content))
+            # First, try the original URL as-is if it's CSV
+            if "output=csv" in original_url:
+                urls_to_try.append(original_url)
+            
+            # Try XLSX conversion
+            xlsx_url = _pubhtml_to_xlsx(original_url)
+            if xlsx_url != original_url:
+                urls_to_try.append(xlsx_url)
+            
+            # Try CSV format as fallback
+            if "output=xlsx" in xlsx_url:
+                csv_url = xlsx_url.replace("output=xlsx", "output=csv")
+                urls_to_try.append(csv_url)
+            
             sheets: Dict[str, pd.DataFrame] = {}
+            last_error = None
             
-            for sheet_name in xls.sheet_names:
+            for i, url in enumerate(urls_to_try):
                 try:
-                    df = xls.parse(sheet_name)
-                    df = df.dropna(how="all").dropna(axis=1, how="all")
-                    if not df.empty:
-                        sheets[sheet_name] = df
-                        logger.info(f"Loaded sheet '{sheet_name}' with {len(df)} rows")
-                except Exception as e:
-                    logger.warning(f"Error processing sheet '{sheet_name}': {e}")
+                    logger.info(f"Trying URL {i+1}/{len(urls_to_try)}: {url}")
                     
-        return sheets
-        
-    except requests.exceptions.RequestException as e:
-        st.error(f"❌ Network error: {str(e)}")
-        return {}
+                    response = requests.get(url, timeout=30)
+                    response.raise_for_status()
+                    
+                    # Check if we got CSV or Excel data
+                    content_type = response.headers.get('content-type', '')
+                    logger.info(f"Content type: {content_type}")
+                    
+                    if 'text/csv' in content_type or url.endswith('csv'):
+                        # Handle CSV data
+                        csv_data = response.content.decode('utf-8')
+                        if csv_data.strip():
+                            df = pd.read_csv(io.StringIO(csv_data))
+                            df = df.dropna(how="all").dropna(axis=1, how="all")
+                            if not df.empty:
+                                sheets["Sheet1"] = df
+                                logger.info(f"Successfully loaded CSV with {len(df)} rows")
+                                break
+                    else:
+                        # Handle Excel data
+                        xls = pd.ExcelFile(io.BytesIO(response.content))
+                        for sheet_name in xls.sheet_names:
+                            try:
+                                df = xls.parse(sheet_name)
+                                df = df.dropna(how="all").dropna(axis=1, how="all")
+                                if not df.empty:
+                                    sheets[sheet_name] = df
+                                    logger.info(f"Loaded sheet '{sheet_name}' with {len(df)} rows")
+                            except Exception as e:
+                                logger.warning(f"Error processing sheet '{sheet_name}': {e}")
+                        
+                        if sheets:
+                            logger.info(f"Successfully loaded Excel with {len(sheets)} sheets")
+                            break
+                    
+                except requests.exceptions.RequestException as e:
+                    last_error = f"Request error for {url}: {str(e)}"
+                    logger.warning(last_error)
+                    continue
+                except Exception as e:
+                    last_error = f"Processing error for {url}: {str(e)}"
+                    logger.warning(last_error)
+                    continue
+            
+            if not sheets:
+                error_msg = f"Failed to load data from any URL format. Last error: {last_error}"
+                logger.error(error_msg)
+                st.error(f"❌ {error_msg}")
+                
+                # Show detailed debugging info
+                with st.expander("🔧 Debugging Information", expanded=True):
+                    st.write("**URLs Attempted:**")
+                    for i, url in enumerate(urls_to_try):
+                        st.code(f"{i+1}. {url}")
+                    
+                    st.write("**Troubleshooting Steps:**")
+                    st.write("""
+                    1. **Check Sheet Permissions**: Go to your Google Sheet → File → Share → "Anyone with the link can view"
+                    2. **Publish the Sheet**: File → Share → Publish to web → Check "Automatically republish"
+                    3. **Verify Data**: Make sure your sheet has data in the expected format
+                    4. **Try Manual URL**: Copy the published CSV link directly from Google Sheets
+                    """)
+                    
+                    if st.button("🔄 Retry Loading"):
+                        st.rerun()
+                
+                return {}
+            
+            return sheets
+            
     except Exception as e:
-        st.error(f"❌ Data loading error: {str(e)}")
+        error_msg = f"Critical error loading data: {str(e)}"
+        logger.error(error_msg)
+        st.error(f"❌ {error_msg}")
         return {}
 
 def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
