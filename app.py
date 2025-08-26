@@ -749,7 +749,6 @@ def main():
 # ENTRYPOINT (debug-friendly)
 # =========================================
 if __name__ == "__main__":
-    # Show the actual error and traceback if something goes wrong.
     try:
         main()
     except Exception as e:
