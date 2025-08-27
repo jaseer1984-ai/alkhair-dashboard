@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import re
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -122,6 +122,10 @@ def apply_css():
         /* Center DF headers only */
         .stDataFrame table thead tr th { text-align: center !important; }
 
+        /* Liquidity headline */
+        .liq-head { font-weight:900; font-size:1.3rem; display:flex; align-items:center; gap:.5rem; }
+        .subtle { color:#6b7280; }
+
         /* Responsive fixes */
         [data-testid="stHorizontalBlock"]{ display:flex; flex-wrap:wrap; gap:1rem; }
         [data-testid="stHorizontalBlock"]>div{ min-width:260px; flex:1 1 260px; }
@@ -236,8 +240,7 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
             df.groupby("BranchName")
               .agg({"SalesTarget":"sum","SalesActual":"sum","SalesPercent":"mean",
                     "NOBTarget":"sum","NOBActual":"sum","NOBPercent":"mean",
-                    "ABVTarget":"mean","ABVActual":"mean","ABVPercent":"mean"})
-              .round(2)
+                    "ABVTarget":"mean","ABVActual":"mean","ABVPercent":"mean"}).round(2)
         )
     if "Date" in df.columns and df["Date"].notna().any():
         k["date_range"] = {"start": df["Date"].min(), "end": df["Date"].max(), "days": int(df["Date"].dt.date.nunique())}
@@ -308,7 +311,7 @@ def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def _liquidity_total_trend_fig(daily: pd.DataFrame, title: str = "Total Liquidity Trend") -> go.Figure:
+def _liquidity_total_trend_fig(daily: pd.DataFrame, title: str) -> go.Figure:
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=daily["Date"], y=daily["TotalLiquidity"], mode="lines+markers",
@@ -325,9 +328,69 @@ def _liquidity_total_trend_fig(daily: pd.DataFrame, title: str = "Total Liquidit
     return fig
 
 
-def _fmt(n: Optional[float]) -> str:
-    if n is None or np.isnan(n): return "—"
-    return f"{n:,.0f}"
+def _fmt(n: Optional[float], decimals: int = 0) -> str:
+    if n is None or (isinstance(n, float) and np.isnan(n)): return "—"
+    fmt = f"{{:,.{decimals}f}}" if decimals > 0 else "{:,.0f}"
+    return fmt.format(n)
+
+
+# =============== NEW: Liquidity analytics helpers ===============
+def _daily_series(df: pd.DataFrame) -> pd.DataFrame:
+    """Return daily total liquidity within current selection, sorted."""
+    d = df.dropna(subset=["Date","TotalLiquidity"]).copy()
+    d = d.groupby("Date", as_index=False)["TotalLiquidity"].sum().sort_values("Date")
+    return d
+
+def _max_drawdown(values: pd.Series) -> float:
+    """Max drawdown on the equity curve (liquidity)."""
+    if values.empty: return float("nan")
+    run_max = values.cummax()
+    dd = values - run_max
+    return float(dd.min())  # negative number
+
+def _project_eom(current_date: pd.Timestamp, last_value: float, avg_daily_delta: float) -> float:
+    if pd.isna(avg_daily_delta) or pd.isna(last_value): return float("nan")
+    # Remaining calendar days in the current month including today?
+    # We’ll project using remaining *future* days.
+    end_of_month = (current_date + pd.offsets.MonthEnd(0)).normalize()
+    remaining_days = max(0, (end_of_month.date() - current_date.date()).days)
+    return float(last_value + remaining_days * avg_daily_delta)
+
+def _liquidity_report(daily: pd.DataFrame) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    if daily.empty:
+        return out
+    # Define MTD window from first day of month to latest date available
+    last_date = daily["Date"].max()
+    mtd_start = pd.Timestamp(last_date.year, last_date.month, 1)
+    mtd = daily[(daily["Date"] >= mtd_start) & (daily["Date"] <= last_date)].copy()
+    if mtd.empty:
+        return out
+
+    # Daily Δ
+    mtd["Delta"] = mtd["TotalLiquidity"].diff()
+
+    out["opening"] = float(mtd["TotalLiquidity"].iloc[0])
+    out["current"] = float(mtd["TotalLiquidity"].iloc[-1])
+    out["change_since_open"] = out["current"] - out["opening"]
+    out["change_since_open_pct"] = (out["change_since_open"] / out["opening"] * 100.0) if out["opening"] else float("nan")
+    out["avg_daily_delta"] = float(mtd["Delta"].dropna().mean()) if mtd["Delta"].notna().any() else float("nan")
+    out["volatility"] = float(mtd["Delta"].dropna().std(ddof=0)) if mtd["Delta"].notna().any() else float("nan")
+    out["proj_eom"] = _project_eom(last_date, out["current"], out["avg_daily_delta"])
+
+    # Best/Worst day by Δ
+    if mtd["Delta"].notna().any():
+        best_idx = mtd["Delta"].idxmax()
+        worst_idx = mtd["Delta"].idxmin()
+        out["best_day"] = (mtd.loc[best_idx, "Date"].date(), float(mtd.loc[best_idx, "Delta"]))
+        out["worst_day"] = (mtd.loc[worst_idx, "Date"].date(), float(mtd.loc[worst_idx, "Delta"]))
+    else:
+        out["best_day"] = out["worst_day"] = (None, float("nan"))
+
+    out["max_drawdown"] = _max_drawdown(mtd["TotalLiquidity"])
+    out["daily_mtd"] = mtd[["Date","TotalLiquidity","Delta"]].copy()
+    return out
+# ================================================================
 
 
 # =========================================
@@ -445,50 +508,56 @@ def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
         st.plotly_chart(_branch_comparison_chart(bp), use_container_width=True, config={"displayModeBar": False})
 
 
+# =============== UPDATED: Liquidity Tab (MTD report model) ===============
 def render_liquidity_tab(df: pd.DataFrame):
     if df.empty or "Date" not in df or "TotalLiquidity" not in df:
         st.info("Liquidity columns not found. Include 'TOTAL LIQUIDITY' in your sheet."); return
-    d = df.dropna(subset=["Date","TotalLiquidity"]).copy()
-    if d.empty:
+
+    daily = _daily_series(df)
+    if daily.empty:
         st.info("No liquidity rows in the selected range."); return
 
-    daily = d.groupby("Date", as_index=False)["TotalLiquidity"].sum().sort_values("Date")
-    last30 = daily.tail(30).copy()
+    # Build MTD analytics
+    rep = _liquidity_report(daily)
+    if not rep:
+        st.info("No MTD data available."); return
 
-    current = float(last30["TotalLiquidity"].iloc[-1]) if len(last30)>=1 else np.nan
-    prev    = float(last30["TotalLiquidity"].iloc[-2]) if len(last30)>=2 else np.nan
-    trend_pct = ((current-prev)/prev*100.0) if (len(last30)>=2 and not np.isnan(prev) and prev!=0) else np.nan
-    max_30 = float(last30["TotalLiquidity"].max()) if not last30.empty else np.nan
-    min_30 = float(last30["TotalLiquidity"].min()) if not last30.empty else np.nan
-    avg_30 = float(last30["TotalLiquidity"].mean()) if not last30.empty else np.nan
+    title = "Total Liquidity — MTD"
+    st.markdown(f"### {title}  ↻")
 
-    col_chart, col_metrics = st.columns([3,1], gap="large")
-    with col_chart:
-        st.markdown("#### 🧪 Liquidity Trend Analysis")
-        st.plotly_chart(_liquidity_total_trend_fig(last30), use_container_width=True, config={"displayModeBar": False})
-    with col_metrics:
-        st.markdown(
-            f"""
-            <div class="card">
-              <div style="font-weight:900; font-size:1.1rem; display:flex; gap:.5rem; align-items:center;">📊 Liquidity Metrics</div>
-              <div style="margin-top:10px;">
-                <div style="color:#6b7280; font-size:.85rem;">Current</div>
-                <div style="font-weight:900; font-size:2rem;">{_fmt(current)}</div>
-              </div>
-              <div style="margin-top:10px;">
-                <div style="color:#6b7280; font-size:.85rem;">Trend</div>
-                <div style="font-weight:900; font-size:1.6rem;">{('+' if (not np.isnan(trend_pct) and trend_pct>=0) else '') + (f'{trend_pct:.1f}%' if not np.isnan(trend_pct) else '—')}</div>
-              </div>
-              <div style="margin-top:10px;">
-                <div style="color:#6b7280; font-size:.85rem;">Statistics (30d)</div>
-                <div class="subtle">Max: {_fmt(max_30)}</div>
-                <div class="subtle">Min: {_fmt(min_30)}</div>
-                <div class="subtle">Avg: {_fmt(avg_30)}</div>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    # Chart (show last ~30 days but honors filter because daily built from filtered df)
+    chart_last = daily.tail(30).copy()
+    st.plotly_chart(_liquidity_total_trend_fig(chart_last, title=""), use_container_width=True, config={"displayModeBar": False})
+
+    # KPI Row 1
+    c1, c2, c3, c4 = st.columns(4, gap="large")
+    c1.metric("Opening (MTD)", f"{_fmt(rep['opening'])}")
+    # Current with green delta like screenshot
+    delta_badge = f"{_fmt(rep['change_since_open'], 0)} ({rep['change_since_open_pct']:.1f}%)" if not np.isnan(rep["change_since_open_pct"]) else "—"
+    c2.metric("Current", f"{_fmt(rep['current'])}", delta=delta_badge)
+    c3.metric("Avg Daily Δ", f"{_fmt(rep['avg_daily_delta'])}")
+    c4.metric("Proj. EOM", f"{_fmt(rep['proj_eom'])}")
+
+    st.markdown("#### Daily Dynamics (MTD)")
+    c5, c6, c7, c8 = st.columns(4, gap="large")
+    # Best / Worst Day
+    best_day, best_val = rep["best_day"]
+    worst_day, worst_val = rep["worst_day"]
+    c5.metric("Best Day", f"{best_day if best_day else '—'}", delta=_fmt(best_val))
+    c6.metric("Worst Day", f"{worst_day if worst_day else '—'}", delta=_fmt(worst_val))
+    # Volatility & Max Drawdown
+    c7.metric("Volatility (σ Δ)", f"{_fmt(rep['volatility'])}")
+    c8.metric("Max Drawdown", f"{_fmt(rep['max_drawdown'])}")
+
+    # Optional small table for transparency
+    with st.expander("Show MTD daily table"):
+        mtd_df = rep["daily_mtd"].copy()
+        mtd_df["Date"] = mtd_df["Date"].dt.date
+        st.dataframe(
+            mtd_df.rename(columns={"TotalLiquidity":"Liquidity", "Delta":"Δ"}),
+            use_container_width=True
         )
+# ==========================================================================
 
 
 # =========================================
@@ -600,21 +669,6 @@ def main():
                     if prev:
                         trend = (float(last30["TotalLiquidity"].iloc[-1]) - prev) / prev * 100.0
                         insights.append(f"📈 30-day trend: {trend:+.1f}%")
-
-                if not last30.empty:
-                    peak_day = last30.loc[last30["TotalLiquidity"].idxmax(), "Date"].date()
-                    trough_day = last30.loc[last30["TotalLiquidity"].idxmin(), "Date"].date()
-                    insights.append(f"📅 Max day (30d): {peak_day} • Min day (30d): {trough_day}")
-
-                if {"ChangeLiquidity","BranchName"}.issubset(df.columns):
-                    br = dliq.groupby("BranchName", as_index=False)["ChangeLiquidity"].sum()
-                    if not br.empty:
-                        up_row = br.loc[br["ChangeLiquidity"].idxmax()]
-                        down_row = br.loc[br["ChangeLiquidity"].idxmin()]
-                        if float(up_row["ChangeLiquidity"]) > 0:
-                            insights.append(f"🏦 Biggest ↑ branch: {up_row['BranchName']} — SAR {float(up_row['ChangeLiquidity']):,.0f}")
-                        if float(down_row["ChangeLiquidity"]) < 0:
-                            insights.append(f"🏦 Biggest ↓ branch: {down_row['BranchName']} — SAR {float(down_row['ChangeLiquidity']):,.0f}")
 
         st.markdown("\n".join(f"- {line}" for line in insights) if insights else "All metrics look healthy for the current selection.")
 
