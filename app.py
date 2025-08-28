@@ -1,1024 +1,729 @@
-# ABEER BLUESTAR SOCCER FEST 2K25 — Complete Streamlit Dashboard
-# Author: AI Assistant | Updated: 2025-08-28
-# What’s new in this build:
-# - Tabs bar is STICKY (frozen) — content scrolls beneath it
-# - Sidebar toggle kept visible
-# - Removed "Minimum goals per player" quick filter
-# - Player Search is a type-to-search multiselect
-# - Removed every "avg goals per player" display
-# - Fixed Altair TitleParams (fontWeight)
-# - Title shows football emoji correctly
-# - Robust World Cup trophy watermark background
-
 from __future__ import annotations
 
-import base64
-from datetime import datetime
-from io import BytesIO
-from pathlib import Path
-import xml.etree.ElementTree as ET
-import zipfile
+import io
+import re
+from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional, Tuple
 
-import altair as alt
+import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
+import plotly.graph_objects as go
 
-# Optional imports with fallbacks
-PLOTLY_AVAILABLE = False
-try:
-    import plotly.express as px
-    import plotly.graph_objects as go
-    PLOTLY_AVAILABLE = True
-except Exception:
-    px = None
-    go = None
 
-# ====================== CONFIGURATION =============================
-st.set_page_config(
-    page_title="ABEER BLUESTAR SOCCER FEST 2K25",
-    page_icon="⚽",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# =========================================
+# CONFIG
+# =========================================
+class Config:
+    PAGE_TITLE = "Al Khair Business Performance"
+    LAYOUT = "wide"
+    DEFAULT_PUBLISHED_URL = (
+        "https://docs.google.com/spreadsheets/d/e/2PACX-1vROaePKJN3XhRor42BU4Kgd9fCAgW7W8vWJbwjveQWoJy8HCRBUAYh2s0AxGsBa3w/pub?output=xlsx"
+    )
+    BRANCHES = {
+        "Al khair - 102": {"name": "Al Khair", "code": "102", "color": "#3b82f6"},
+        "Noora - 104": {"name": "Noora", "code": "104", "color": "#10b981"},
+        "Hamra - 109": {"name": "Hamra", "code": "109", "color": "#f59e0b"},
+        "Magnus - 107": {"name": "Magnus", "code": "107", "color": "#8b5cf6"},
+    }
+    TARGETS = {"sales_achievement": 95.0, "nob_achievement": 90.0, "abv_achievement": 90.0}
+    SHOW_SUBTITLE = False
+    CARDS_PER_ROW = 3  # branch cards per row
 
-# ====================== STYLING ===================================
-def inject_advanced_css():
+
+config = Config()
+st.set_page_config(page_title=config.PAGE_TITLE, layout=config.LAYOUT, initial_sidebar_state="expanded")
+
+
+# =========================================
+# CSS
+# =========================================
+def apply_css():
     st.markdown(
         """
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root{
-          /* Adjust this if the sticky tabs should sit a bit lower/higher */
-          --sticky-tabs-top: 52px;
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
+        html, body, [data-testid="stAppViewContainer"] { font-family: 'Inter', sans-serif; }
+
+        /* Wider main area */
+        .main .block-container { padding: 1rem 1.2rem; max-width: 1800px; }
+
+        /* ---- HERO HEADER ---- */
+        .hero { text-align:center; margin: 0 0 10px 0; }
+        .hero-bar { width: min(1100px,95%); height:18px; margin:8px auto 18px;
+          border-radius:14px; background:linear-gradient(90deg,#3b82f6 0%, #4338ca 100%);
+          box-shadow:0 12px 30px rgba(67,56,202,.25);}
+        .hero-title { font-weight:900; font-size:clamp(26px,3.6vw,42px); letter-spacing:.2px;
+          color:#111827; display:inline-flex; align-items:center; gap:.55rem; }
+        .hero-emoji { font-size:1.15em; }
+        .subtitle { color:#6b7280; font-size:.95rem; margin-bottom:1rem; text-align:center; }
+
+        /* Metric tiles */
+        [data-testid="metric-container"]{
+          background:#fff!important;border-radius:16px!important;border:1px solid rgba(0,0,0,.06)!important;
+          padding:16px!important;text-align:center!important;
+        }
+        [data-testid="stMetricValue"]{ font-size:clamp(16px,2.2vw,22px)!important; line-height:1.2!important; }
+        [data-testid="stMetricLabel"]{ font-size:.85rem!important;color:#6b7280!important; }
+
+        /* Equal, flush 5-column metric row */
+        .metrics-row [data-testid="stHorizontalBlock"]{ display:flex; flex-wrap:nowrap; gap:12px; }
+        .metrics-row [data-testid="stHorizontalBlock"]>div{ flex:1 1 0!important; min-width:180px; }
+        @media (max-width: 880px){ .metrics-row [data-testid="stHorizontalBlock"]{ flex-wrap:wrap; } }
+
+        /* Branch cards */
+        .card { background:#fcfcfc; border:1px solid #f1f5f9; border-radius:16px; padding:16px; height:100%; }
+        .branch-card { display:flex; flex-direction:column; height:100%; position:relative; }
+        .branch-metrics{
+          display:grid; grid-template-columns: repeat(3, 1fr);
+          gap: 6px 12px; margin-top: 10px; text-align: center; align-items: center;
+        }
+        .branch-metrics .label{ font-size:.80rem; color:#64748b; }
+        .branch-metrics .value{ font-weight:700; }
+
+        .pill { display:inline-block; padding:4px 10px; border-radius:999px; font-weight:700; font-size:.80rem; }
+        .pill.excellent { background:#ecfdf5; color:#059669; }
+        .pill.good      { background:#eff6ff; color:#2563eb; }
+        .pill.warn      { background:#fffbeb; color:#d97706; }
+        .pill.danger    { background:#fef2f2; color:#dc2626; }
+
+        /* ---- Tabs (readable/selected) ---- */
+        .stTabs [data-baseweb="tab-list"]{ gap:8px; border-bottom:none; }
+        .stTabs [data-baseweb="tab"]{
+          position:relative; border-radius:10px 10px 0 0 !important; padding:10px 18px !important;
+          font-weight:700 !important; background:#f3f4f6 !important; color:#1f2937 !important;
+          border:1px solid #e5e7eb !important; border-bottom:none !important;
+        }
+        .stTabs [data-baseweb="tab"] p{ color:inherit !important; }
+        .stTabs [data-baseweb="tab"]:hover{ background:#e5e7eb!important; }
+        .stTabs [aria-selected="true"]{
+          background:#ffffff !important; color:#111827 !important; border-color:#c7d2fe !important;
+          box-shadow:0 4px 12px rgba(0,0,0,.08) !important;
+        }
+        .stTabs [aria-selected="true"] p{ color:#111827 !important; }
+        .stTabs [aria-selected="true"]::after{
+          content:""; position:absolute; left:8px; right:8px; bottom:-1px;
+          height:3px; border-radius:999px;
+          background:linear-gradient(90deg,#ef4444,#f97316,#22c55e,#3b82f6);
         }
 
-        .stApp {
-            font-family: 'Poppins', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        /* Sidebar — narrower */
+        [data-testid="stSidebar"]{
+          background:#f7f9fc; border-right:1px solid #e5e7eb;
+          width: 240px; min-width: 220px; max-width: 240px;
         }
-        .block-container {
-            padding-top: 0.5rem;
-            padding-bottom: 2rem;
-            max-width: 98vw;
-            width: 98vw;
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(15px);
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
-            margin: 1rem auto;
-            position: relative; /* for z layering */
-            z-index: 1;
-        }
+        [data-testid="stSidebar"] .block-container { padding:18px 12px 20px; }
+        .sb-title{ display:flex; gap:10px; align-items:center; font-weight:900; font-size:1.02rem; }
+        .sb-subtle{ color:#6b7280; font-size:.82rem; margin:6px 0 12px; }
+        .sb-section{ font-size:.78rem; font-weight:800; letter-spacing:.02em; text-transform:uppercase; color:#64748b; margin:12px 4px 6px; }
+        .sb-hr{ height:1px; background:#e5e7eb; margin:12px 0; border-radius:999px; }
 
-        /* Keep header/toolbar visible so sidebar toggle shows */
-        #MainMenu, footer, .stDeployButton,
-        div[data-testid="stDecoration"],
-        div[data-testid="stStatusWidget"] {
-            display: none !important;
-        }
+        /* Center DF headers only */
+        .stDataFrame table thead tr th { text-align: center !important; }
 
-        /* ----- STICKY TABS (freeze the pane just below the tabs) ----- */
-        .block-container [data-testid="stTabs"]:first-of-type{
-            position: sticky;
-            top: var(--sticky-tabs-top);
-            z-index: 6;                           /* above content, below dialogs */
-            background: rgba(255,255,255,0.96);   /* frosted background */
-            backdrop-filter: blur(8px);
-            border-bottom: 1px solid #e2e8f0;
-            padding-top: .25rem;
-            padding-bottom: .25rem;
-            margin-top: .25rem;
-        }
+        /* Liquidity headline */
+        .liq-head { font-weight:900; font-size:1.3rem; display:flex; align-items:center; gap:.5rem; }
+        .subtle { color:#6b7280; }
 
-        /* App title */
-        .app-title{
-            display:flex; align-items:center; justify-content:center; gap:12px;
-            margin: .75rem 0 1.0rem;
-        }
-        .app-title .ball{
-            font-size: 32px; line-height:1;
-            filter: drop-shadow(0 2px 4px rgba(0,0,0,.15));
-        }
-        .app-title .title{
-            font-weight:700; letter-spacing:.05em;
-            font-size: clamp(22px, 3.5vw, 36px);
-            background: linear-gradient(45deg, #0ea5e9, #1e40af, #7c3aed);
-            -webkit-background-clip: text; background-clip: text;
-            -webkit-text-fill-color: transparent;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        /* Buttons */
-        .stButton > button, .stDownloadButton > button {
-            background: linear-gradient(135deg, #0ea5e9, #3b82f6) !important;
-            color: white !important;
-            border: 0 !important;
-            border-radius: 12px !important;
-            padding: 0.6rem 1.2rem !important;
-            font-weight: 600 !important;
-            font-size: 0.9rem !important;
-            transition: all 0.3s ease !important;
-            box-shadow: 0 4px 15px rgba(14, 165, 233, 0.3) !important;
-        }
-        .stButton > button:hover, .stDownloadButton > button:hover {
-            transform: translateY(-2px) !important;
-            box-shadow: 0 8px 25px rgba(14, 165, 233, 0.4) !important;
-            filter: brightness(1.05) !important;
-        }
-
-        /* Dataframes */
-        .stDataFrame {
-            border-radius: 15px !important;
-            overflow: hidden !important;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.08) !important;
-        }
-
-        /* Metric cards */
-        .metric-container {
-            background: linear-gradient(135deg, rgba(14,165,233,.1), rgba(59,130,246,.05));
-            border-radius: 15px;
-            padding: 1.5rem;
-            border-left: 4px solid #0ea5e9;
-            box-shadow: 0 4px 20px rgba(14,165,233,.1);
-            transition: transform .2s ease;
-        }
-        .metric-container:hover { transform: translateY(-3px); }
-
-        /* Sidebar status pill */
-        .status-pill { padding:.5rem .75rem; border-radius:.6rem; font-size:.85rem; margin-top:.5rem; }
-        .status-ok  { background:#ecfeff; border-left:4px solid #06b6d4; color:#155e75; }
-        .status-warn{ background:#fef9c3; border-left:4px solid #f59e0b; color:#713f12; }
-        .status-err { background:#fee2e2; border-left:4px solid #ef4444; color:#7f1d1d; }
-
-        @media (max-width: 768px) {
-            .block-container { padding: 1rem .5rem; margin: .5rem; width: 95vw; max-width: 95vw; }
-            .app-title .ball{font-size:24px;}
-        }
-    </style>
-    """,
+        /* Responsive fixes */
+        [data-testid="stHorizontalBlock"]{ display:flex; flex-wrap:wrap; gap:1rem; }
+        [data-testid="stHorizontalBlock"]>div{ min-width:260px; flex:1 1 260px; }
+        [data-testid="stPlotlyChart"], [data-testid="stDataFrame"]{ overflow:auto; }
+        .js-plotly-plot, .plotly, .js-plotly-plot .plotly, .js-plotly-plot .main-svg { max-width:100%!important; }
+        </style>
+        """,
         unsafe_allow_html=True,
     )
 
-    # Altair theme
-    alt.themes.register(
-        "tournament_theme",
-        lambda: {
-            "config": {
-                "view": {"stroke": "transparent", "fill": "white"},
-                "background": "white",
-                "title": {"font": "Poppins", "fontSize": 18, "color": "#1e293b", "fontWeight": 600},
-                "axis": {
-                    "labelColor": "#64748b",
-                    "titleColor": "#374151",
-                    "gridColor": "#f1f5f9",
-                    "labelFont": "Poppins",
-                    "titleFont": "Poppins",
-                },
-                "legend": {
-                    "labelColor": "#64748b",
-                    "titleColor": "#374151",
-                    "labelFont": "Poppins",
-                    "titleFont": "Poppins",
-                },
-                "range": {
-                    "category": [
-                        "#0ea5e9","#34d399","#60a5fa","#f59e0b",
-                        "#f87171","#a78bfa","#fb7185","#4ade80",
-                    ]
-                },
-            }
-        },
-    )
-    alt.themes.enable("tournament_theme")
 
-def notify(msg: str, kind: str = "ok"):
-    cls = {"ok": "status-ok", "warn": "status-warn", "err": "status-err"}.get(kind, "status-ok")
-    st.markdown(f'<div class="status-pill {cls}">{msg}</div>', unsafe_allow_html=True)
+# =========================================
+# LOADERS / HELPERS
+# =========================================
+def _normalize_gsheet_url(url: str) -> str:
+    u = (url or "").strip()
+    u = re.sub(r"/pubhtml(\?.*)?$", "/pub?output=xlsx", u)
+    u = re.sub(r"/pub\?output=csv(\&.*)?$", "/pub?output=xlsx", u)
+    return u or url
 
-# ---------- Robust Trophy watermark (DOM element, not :before) ----------
-def add_world_cup_watermark(*, image_path: str | None = None,
-                            image_url: str | None = None,
-                            opacity: float = 0.08,
-                            size: str = "68vmin",
-                            y_offset: str = "6vh"):
-    """Shows a big, faint trophy behind the whole app."""
-    if image_path:
-        ext = "svg+xml" if image_path.lower().endswith(".svg") else "png"
-        b64 = base64.b64encode(Path(image_path).read_bytes()).decode()
-        bg = f"url('data:image/{ext};base64,{b64}')"
-    elif image_url:
-        bg = f"url('{image_url}')"
-    else:
-        bg = "url('https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f3c6.svg')"
 
-    st.markdown(
-        f"""
-    <style>
-      #wc-trophy {{
-        position: fixed;
-        inset: 0;
-        background-image: {bg};
-        background-repeat: no-repeat;
-        background-position: center {y_offset};
-        background-size: {size};
-        opacity: {opacity};
-        pointer-events: none;
-        z-index: 0; /* below content; .block-container has z-index:1 */
-      }}
-    </style>
-    <div id="wc-trophy"></div>
-    """,
-        unsafe_allow_html=True,
-    )
+@st.cache_data(show_spinner=False)
+def load_workbook_from_gsheet(published_url: str) -> Dict[str, pd.DataFrame]:
+    url = _normalize_gsheet_url((published_url or config.DEFAULT_PUBLISHED_URL).strip())
+    r = requests.get(url, timeout=60)
+    r.raise_for_status()
+    content_type = (r.headers.get("Content-Type") or "").lower()
 
-# ====================== DATA PROCESSING ===========================
-def parse_xlsx_without_dependencies(file_bytes: bytes) -> pd.DataFrame:
-    ns = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
-    with zipfile.ZipFile(BytesIO(file_bytes)) as z:
-        shared = []
-        if "xl/sharedStrings.xml" in z.namelist():
-            with z.open("xl/sharedStrings.xml") as f:
-                root = ET.parse(f).getroot()
-                for si in root.findall(".//main:si", ns):
-                    text = "".join(t.text or "" for t in si.findall(".//main:t", ns))
-                    shared.append(text)
-
-        if "xl/worksheets/sheet1.xml" not in z.namelist():
-            return pd.DataFrame()
-        with z.open("xl/worksheets/sheet1.xml") as f:
-            root = ET.parse(f).getroot()
-            sheet = root.find("main:sheetData", ns)
-            if sheet is None:
-                return pd.DataFrame()
-            rows, max_col = [], 0
-            for row in sheet.findall("main:row", ns):
-                rd = {}
-                for cell in row.findall("main:c", ns):
-                    ref = cell.attrib.get("r", "A1")
-                    col_letters = "".join(ch for ch in ref if ch.isalpha())
-                    col_idx = 0
-                    for ch in col_letters:
-                        col_idx = col_idx * 26 + (ord(ch) - 64)
-                    col_idx -= 1
-                    ctype = cell.attrib.get("t")
-                    v = cell.find("main:v", ns)
-                    val = v.text if v is not None else None
-                    if ctype == "s" and val is not None:
-                        i = int(val)
-                        if 0 <= i < len(shared):
-                            val = shared[i]
-                    rd[col_idx] = val
-                    max_col = max(max_col, col_idx)
-                rows.append(rd)
-
-    if not rows:
-        return pd.DataFrame()
-    matrix = [[r.get(i) for i in range(max_col + 1)] for r in rows]
-    return pd.DataFrame(matrix)
-
-def safe_read_excel(file_source) -> pd.DataFrame:
-    if isinstance(file_source, (str, Path)):
-        with open(file_source, "rb") as f:
-            file_bytes = f.read()
-    elif isinstance(file_source, bytes):
-        file_bytes = file_source
-    else:
-        file_bytes = file_source.read()
+    if "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in content_type or "output=xlsx" in url:
+        try:
+            xls = pd.ExcelFile(io.BytesIO(r.content))
+            out: Dict[str, pd.DataFrame] = {}
+            for sn in xls.sheet_names:
+                df = xls.parse(sn).dropna(how="all").dropna(axis=1, how="all")
+                if not df.empty:
+                    out[sn] = df
+            if out:
+                return out
+        except Exception:
+            pass
 
     try:
-        return pd.read_excel(BytesIO(file_bytes), header=None)
+        df = pd.read_csv(io.BytesIO(r.content))
     except Exception:
-        return parse_xlsx_without_dependencies(file_bytes)
+        df = pd.read_csv(io.BytesIO(r.content), sep=";")
+    df = df.dropna(how="all").dropna(axis=1, how="all")
+    return {"Sheet1": df} if not df.empty else {}
 
-def find_division_columns(raw_df: pd.DataFrame):
-    b_col, a_col = None, None
-    for row_idx in range(min(2, len(raw_df))):
-        row = raw_df.iloc[row_idx].astype(str).str.strip().str.lower()
-        for col_idx, cell in row.items():
-            if "b division" in cell and b_col is None:
-                b_col = col_idx
-            elif "a division" in cell and a_col is None:
-                a_col = col_idx
-    if b_col is None and a_col is None:
-        b_col = 0
-        a_col = 5 if raw_df.shape[1] >= 8 else (4 if raw_df.shape[1] >= 7 else None)
-    return b_col, a_col
 
-def process_tournament_data(xlsx_bytes: bytes) -> pd.DataFrame:
-    raw_df = safe_read_excel(xlsx_bytes)
-    if raw_df.empty:
-        return pd.DataFrame(columns=["Division", "Team", "Player", "Goals"])
+def _parse_numeric(s: pd.Series) -> pd.Series:
+    return pd.to_numeric(
+        s.astype(str).str.replace(",", "", regex=False).str.replace("%", "", regex=False).str.strip(),
+        errors="coerce",
+    )
 
-    b_start, a_start = find_division_columns(raw_df)
-    header_row = 1 if len(raw_df) > 1 else 0
-    data_start_row = header_row + 1
 
-    processed = []
-
-    def extract_div(start_col: int | None, name: str):
-        if start_col is None or start_col + 2 >= raw_df.shape[1]:
-            return
-        df = raw_df.iloc[data_start_row:, start_col:start_col + 3].copy()
-        df.columns = ["Team", "Player", "Goals"]
-        df = df.dropna(subset=["Team", "Player", "Goals"])
-        df["Goals"] = pd.to_numeric(df["Goals"], errors="coerce")
-        df = df.dropna(subset=["Goals"])
-        df["Goals"] = df["Goals"].astype(int)
-        df["Division"] = name
-        processed.extend(df.to_dict("records"))
-
-    extract_div(b_start, "B Division")
-    extract_div(a_start, "A Division")
-
-    if not processed:
-        return pd.DataFrame(columns=["Division", "Team", "Player", "Goals"])
-    out = pd.DataFrame(processed)
-    return out[["Division", "Team", "Player", "Goals"]]
-
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_tournament_data(url: str) -> pd.DataFrame:
-    try:
-        r = requests.get(url, timeout=30)
-        r.raise_for_status()
-        if not r.content:
-            raise ValueError("Downloaded file is empty")
-        return process_tournament_data(r.content)
-    except Exception:
-        return pd.DataFrame(columns=["Division", "Team", "Player", "Goals"])
-
-# ====================== ANALYTICS FUNCTIONS =======================
-def calculate_tournament_stats(df: pd.DataFrame) -> dict:
-    if df.empty:
-        return {
-            "total_goals": 0,
-            "total_players": 0,
-            "total_teams": 0,
-            "divisions": 0,
-            "avg_goals_per_team": 0,
-            "top_scorer_goals": 0,
-            "competitive_balance": 0,
-        }
-
-    player_totals = df.groupby(["Player", "Team", "Division"])["Goals"].sum().reset_index()
-    team_totals = df.groupby(["Team", "Division"])["Goals"].sum().reset_index()
-
-    return {
-        "total_goals": int(df["Goals"].sum()),
-        "total_players": len(player_totals),
-        "total_teams": len(team_totals),
-        "divisions": df["Division"].nunique(),
-        "avg_goals_per_team": round(df["Goals"].sum() / max(1, len(team_totals)), 2),
-        "top_scorer_goals": int(player_totals["Goals"].max()) if not player_totals.empty else 0,
-        "competitive_balance": round(team_totals["Goals"].std(), 2) if len(team_totals) > 1 else 0,
+def process_branch_data(excel_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+    combined: List[pd.DataFrame] = []
+    mapping = {
+        "Date": "Date", "Day": "Day",
+        "Sales Target": "SalesTarget", "SalesTarget": "SalesTarget",
+        "Sales Achivement": "SalesActual", "Sales Achievement": "SalesActual", "SalesActual": "SalesActual",
+        "Sales %": "SalesPercent", " Sales %": "SalesPercent", "SalesPercent": "SalesPercent",
+        "NOB Target": "NOBTarget", "NOBTarget": "NOBTarget",
+        "NOB Achievemnet": "NOBActual", "NOB Achievement": "NOBActual", "NOBActual": "NOBActual",
+        "NOB %": "NOBPercent", " NOB %": "NOBPercent", "NOBPercent": "NOBPercent",
+        "ABV Target": "ABVTarget", "ABVTarget": "ABVTarget",
+        "ABV Achievement": "ABVActual", " ABV Achievement": "ABVActual", "ABVActual": "ABVActual",
+        "ABV %": "ABVPercent", "ABVPercent": "ABVPercent",
+        "BANK": "Bank", "Bank": "Bank",
+        "CASH": "Cash", "Cash": "Cash",
+        "TOTAL LIQUIDITY": "TotalLiquidity", "Total Liquidity": "TotalLiquidity",
+        "Change in Liquidity": "ChangeLiquidity", "% of Change": "PctChange",
     }
+    for sheet_name, df in excel_data.items():
+        if df.empty: continue
+        d = df.copy()
+        d.columns = d.columns.astype(str).str.strip()
+        for old, new in mapping.items():
+            if old in d.columns and new not in d.columns:
+                d.rename(columns={old: new}, inplace=True)
+        if "Date" not in d.columns:
+            maybe = [c for c in d.columns if "date" in c.lower()]
+            if maybe: d.rename(columns={maybe[0]: "Date"}, inplace=True)
+        d["Branch"] = sheet_name
+        meta = config.BRANCHES.get(sheet_name, {})
+        d["BranchName"] = meta.get("name", sheet_name)
+        d["BranchCode"] = meta.get("code", "000")
+        if "Date" in d.columns: d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
+        for col in ["SalesTarget","SalesActual","SalesPercent","NOBTarget","NOBActual","NOBPercent",
+                    "ABVTarget","ABVActual","ABVPercent","Bank","Cash","TotalLiquidity","ChangeLiquidity","PctChange"]:
+            if col in d.columns: d[col] = _parse_numeric(d[col])
+        combined.append(d)
+    return pd.concat(combined, ignore_index=True) if combined else pd.DataFrame()
 
-def get_top_performers(df: pd.DataFrame, top_n: int = 10) -> dict:
-    if df.empty:
-        return {"players": pd.DataFrame(), "teams": pd.DataFrame()}
-    top_players = (
-        df.groupby(["Player", "Team", "Division"])["Goals"]
-        .sum()
-        .reset_index()
-        .sort_values(["Goals", "Player"], ascending=[False, True])
-        .head(top_n)
-    )
-    top_teams = (
-        df.groupby(["Team", "Division"])["Goals"]
-        .sum()
-        .reset_index()
-        .sort_values("Goals", ascending=False)
-        .head(top_n)
-    )
-    return {"players": top_players, "teams": top_teams}
 
-def create_division_comparison(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return pd.DataFrame()
-    division_stats = (
-        df.groupby("Division")
-        .agg(Goals_sum=("Goals", "sum"), Goals_mean=("Goals", "mean"), Records=("Goals", "count"),
-             Teams=("Team", "nunique"), Players=("Player", "nunique"))
-        .round(2)
-        .reset_index()
-        .rename(columns={"Goals_sum": "Total_Goals", "Goals_mean": "Avg_Goals", "Records": "Total_Records"})
-    )
-    total_goals = division_stats["Total_Goals"].sum()
-    division_stats["Goal_Share_Pct"] = (division_stats["Total_Goals"] / total_goals * 100).round(1) if total_goals else 0
-    return division_stats
-
-# ====================== VISUALIZATION FUNCTIONS ===================
-def create_horizontal_bar_chart(df: pd.DataFrame, x_col: str, y_col: str, title: str, color_scheme: str = "blues") -> alt.Chart:
-    if df.empty:
-        return alt.Chart(pd.DataFrame({"note": ["No data available"]})).mark_text().encode(text="note:N")
-    max_val = int(df[x_col].max()) if not df.empty else 1
-    tick_values = list(range(0, max_val + 1)) if max_val <= 50 else None
-    return (
-        alt.Chart(df)
-        .mark_bar(cornerRadiusTopRight=6, cornerRadiusBottomRight=6, opacity=0.85, stroke="white", strokeWidth=1)
-        .encode(
-            x=alt.X(f"{x_col}:Q", title="Goals", axis=alt.Axis(format="d", tickMinStep=1, values=tick_values, gridOpacity=0.3), scale=alt.Scale(domainMin=0, nice=False)),
-            y=alt.Y(f"{y_col}:N", sort="-x", title=None, axis=alt.Axis(labelLimit=200)),
-            color=alt.Color(f"{x_col}:Q", scale=alt.Scale(scheme=color_scheme), legend=None),
-            tooltip=[alt.Tooltip(f"{y_col}:N", title=y_col), alt.Tooltip(f"{x_col}:Q", title="Goals", format="d")],
+def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
+    if df.empty: return {}
+    k: Dict[str, Any] = {}
+    k["total_sales_target"] = float(df.get("SalesTarget", pd.Series(dtype=float)).sum())
+    k["total_sales_actual"] = float(df.get("SalesActual", pd.Series(dtype=float)).sum())
+    k["total_sales_variance"] = k["total_sales_actual"] - k["total_sales_target"]
+    k["overall_sales_percent"] = (k["total_sales_actual"]/k["total_sales_target"]*100) if k["total_sales_target"] > 0 else 0.0
+    k["total_nob_target"] = float(df.get("NOBTarget", pd.Series(dtype=float)).sum())
+    k["total_nob_actual"] = float(df.get("NOBActual", pd.Series(dtype=float)).sum())
+    k["overall_nob_percent"] = (k["total_nob_actual"]/k["total_nob_target"]*100) if k["total_nob_target"] > 0 else 0.0
+    k["avg_abv_target"] = float(df.get("ABVTarget", pd.Series(dtype=float)).mean()) if "ABVTarget" in df else 0.0
+    k["avg_abv_actual"] = float(df.get("ABVActual", pd.Series(dtype=float)).mean()) if "ABVActual" in df else 0.0
+    k["overall_abv_percent"] = (k["avg_abv_actual"]/k["avg_abv_target"]*100) if ("ABVTarget" in df and k["avg_abv_target"]>0) else 0.0
+    if "BranchName" in df.columns:
+        k["branch_performance"] = (
+            df.groupby("BranchName")
+              .agg({"SalesTarget":"sum","SalesActual":"sum","SalesPercent":"mean",
+                    "NOBTarget":"sum","NOBActual":"sum","NOBPercent":"mean",
+                    "ABVTarget":"mean","ABVActual":"mean","ABVPercent":"mean"}).round(2)
         )
-        .properties(height=max(300, min(600, len(df) * 25)), title=alt.TitleParams(text=title, fontSize=16, anchor="start", fontWeight=600))
-        .resolve_scale(color="independent")
+    if "Date" in df.columns and df["Date"].notna().any():
+        k["date_range"] = {"start": df["Date"].min(), "end": df["Date"].max(), "days": int(df["Date"].dt.date.nunique())}
+    score=w=0.0
+    if k.get("overall_sales_percent",0)>0: score += min(k["overall_sales_percent"]/100,1.2)*40; w+=40
+    if k.get("overall_nob_percent",0)>0:   score += min(k["overall_nob_percent"]/100,1.2)*35; w+=35
+    if k.get("overall_abv_percent",0)>0:   score += min(k["overall_abv_percent"]/100,1.2)*25; w+=25
+    k["performance_score"] = (score/w*100) if w>0 else 0.0
+    return k
+
+
+# =========================================
+# CHARTS
+# =========================================
+def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool = True) -> go.Figure:
+    if df.empty or "Date" not in df.columns or df["Date"].isna().all():
+        return go.Figure()
+    agg_func = "sum" if y_col != "ABVActual" else "mean"
+    daily_actual = df.groupby(["Date","BranchName"]).agg({y_col: agg_func}).reset_index()
+    target_col = {"SalesActual":"SalesTarget","NOBActual":"NOBTarget","ABVActual":"ABVTarget"}.get(y_col)
+    daily_target: Optional[pd.DataFrame] = None
+    if show_target and target_col and target_col in df.columns:
+        agg_func_target = "sum" if y_col != "ABVActual" else "mean"
+        daily_target = df.groupby(["Date","BranchName"]).agg({target_col: agg_func_target}).reset_index()
+    fig = go.Figure()
+    palette = ["#3b82f6","#10b981","#f59e0b","#8b5cf6","#ef4444","#14b8a6"]
+    for i, br in enumerate(sorted(daily_actual["BranchName"].unique())):
+        d_actual = daily_actual[daily_actual["BranchName"]==br]
+        color = palette[i % len(palette)]
+        fig.add_trace(go.Scatter(
+            x=d_actual["Date"], y=d_actual[y_col], name=f"{br} - Actual",
+            mode="lines+markers", line=dict(width=3,color=color), fill="tozeroy",
+            hovertemplate=f"<b>{br}</b><br>Date: %{{x|%Y-%m-%d}}<br>Actual: %{{y:,.0f}}<extra></extra>",
+        ))
+        if daily_target is not None:
+            d_target = daily_target[daily_target["BranchName"]==br]
+            fig.add_trace(go.Scatter(
+                x=d_target["Date"], y=d_target[target_col], name=f"{br} - Target",
+                mode="lines", line=dict(width=2,color=color,dash="dash"),
+                hovertemplate=f"<b>{br}</b><br>Date: %{{x|%Y-%m-%d}}<br>Target: %{{y:,.0f}}<extra></extra>",
+                showlegend=False if len(sorted(daily_actual["BranchName"].unique()))>1 else True,
+            ))
+    fig.update_layout(
+        title=title, height=420, showlegend=True,
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+        xaxis_title="Date", yaxis_title="Value",
+        autosize=True, margin=dict(l=40,r=20,t=40,b=40),
     )
+    return fig
 
-def create_division_donut_chart(df: pd.DataFrame) -> alt.Chart:
-    if df.empty:
-        return alt.Chart(pd.DataFrame({"note": ["No data available"]})).mark_text().encode(text="note:N")
 
-    division_data = df.groupby("Division")["Goals"].sum().reset_index()
-    sel = alt.selection_single(fields=["Division"], empty="none")
-
-    base = (
-        alt.Chart(division_data)
-        .add_selection(sel)
-        .properties(
-            width=300,
-            height=300,
-            title=alt.TitleParams(text="Goals Distribution by Division", fontSize=16, fontWeight=600),
-        )
+def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
+    if bp.empty: return go.Figure()
+    metrics = {"SalesPercent":"Sales %","NOBPercent":"NOB %","ABVPercent":"ABV %"}
+    fig = go.Figure()
+    x = bp.index.tolist()
+    palette = ["#3b82f6","#10b981","#f59e0b"]
+    for i,(col,label) in enumerate(metrics.items()):
+        fig.add_trace(go.Bar(x=x, y=bp[col].tolist(), name=label, marker=dict(color=palette[i%len(palette)])))
+    fig.update_layout(
+        barmode="group", title="Branch Performance Comparison (%)",
+        xaxis_title="Branch", yaxis_title="Percent", height=400,
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+        autosize=True, margin=dict(l=40,r=20,t=40,b=40),
     )
+    return fig
 
-    outer = (
-        base.mark_arc(innerRadius=60, outerRadius=120, stroke="white", strokeWidth=2)
-        .encode(
-            theta=alt.Theta("Goals:Q", title="Goals"),
-            color=alt.Color("Division:N", scale=alt.Scale(range=["#0ea5e9", "#f59e0b"]), title="Division"),
-            opacity=alt.condition(sel, alt.value(1.0), alt.value(0.8)),
-            tooltip=["Division:N", alt.Tooltip("Goals:Q", format="d")],
-        )
+
+def _liquidity_total_trend_fig(daily: pd.DataFrame, title: str) -> go.Figure:
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=daily["Date"], y=daily["TotalLiquidity"], mode="lines+markers",
+        line=dict(width=4, color="#3b82f6"), marker=dict(size=6),
+        hovertemplate="Date: %{x|%b %d, %Y}<br>Liquidity: SAR %{y:,.0f}<extra></extra>",
+        name="Total Liquidity",
+    ))
+    fig.update_layout(
+        title=title, height=420, showlegend=False,
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        xaxis_title="Date", yaxis_title="Liquidity (SAR)",
+        autosize=True, margin=dict(l=40,r=20,t=40,b=40),
     )
+    return fig
 
-    center_text = (
-        base.mark_text(align="center", baseline="middle", fontSize=18, fontWeight="bold", color="#1e293b")
-        .encode(text=alt.value(f"Total\n{int(division_data['Goals'].sum())}"))
-    )
 
-    return outer + center_text
+def _fmt(n: Optional[float], decimals: int = 0) -> str:
+    if n is None or (isinstance(n, float) and np.isnan(n)): return "—"
+    fmt = f"{{:,.{decimals}f}}" if decimals > 0 else "{:,.0f}"
+    return fmt.format(n)
 
-def create_advanced_scatter_plot(df: pd.DataFrame):
-    if df.empty:
-        if PLOTLY_AVAILABLE:
-            fig = go.Figure(); fig.add_annotation(text="No data available", x=0.5, y=0.5, showarrow=False); return fig
-        return alt.Chart(pd.DataFrame({"note": ["No data available"]})).mark_text().encode(text="note:N")
 
-    team_stats = df.groupby(["Team", "Division"]).agg(Players=("Player", "nunique"), Goals=("Goals", "sum")).reset_index()
+# =============== NEW: Liquidity analytics helpers ===============
+def _daily_series(df: pd.DataFrame) -> pd.DataFrame:
+    """Return daily total liquidity within current selection, sorted."""
+    d = df.dropna(subset=["Date","TotalLiquidity"]).copy()
+    d = d.groupby("Date", as_index=False)["TotalLiquidity"].sum().sort_values("Date")
+    return d
 
-    if PLOTLY_AVAILABLE:
-        fig = px.scatter(
-            team_stats, x="Players", y="Goals", color="Division", size="Goals",
-            hover_name="Team", hover_data={"Players": True, "Goals": True},
-            title="Team Performance: Players vs Total Goals",
-        )
-        fig.update_traces(marker=dict(sizemode="diameter", sizemin=8, sizemax=30, line=dict(width=2, color="white"), opacity=0.85))
-        fig.update_layout(
-            plot_bgcolor="white",
-            paper_bgcolor="white",
-            font=dict(family="Poppins", size=12),
-            title=dict(font=dict(size=16, color="#1e293b")),
-            xaxis=dict(title="Number of Players in Team", gridcolor="#f1f5f9", zeroline=False),
-            yaxis=dict(title="Total Goals", gridcolor="#f1f5f9", zeroline=False),
-            legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
-            height=400,
-        )
-        return fig
+def _max_drawdown(values: pd.Series) -> float:
+    """Max drawdown on the equity curve (liquidity)."""
+    if values.empty: return float("nan")
+    run_max = values.cummax()
+    dd = values - run_max
+    return float(dd.min())  # negative number
 
-    return (
-        alt.Chart(team_stats)
-        .mark_circle(size=100, opacity=0.85)
-        .encode(
-            x=alt.X("Players:Q", title="Number of Players in Team"),
-            y=alt.Y("Goals:Q", title="Total Goals"),
-            color=alt.Color("Division:N", scale=alt.Scale(range=["#0ea5e9", "#f59e0b"]), title="Division"),
-            size=alt.Size("Goals:Q", legend=None),
-            tooltip=["Team:N", "Division:N", "Players:Q", "Goals:Q"],
-        )
-        .properties(title="Team Performance: Players vs Total Goals", height=400)
-    )
+def _project_eom(current_date: pd.Timestamp, last_value: float, avg_daily_delta: float) -> float:
+    if pd.isna(avg_daily_delta) or pd.isna(last_value): return float("nan")
+    # Remaining calendar days in the current month including today?
+    # We’ll project using remaining *future* days.
+    end_of_month = (current_date + pd.offsets.MonthEnd(0)).normalize()
+    remaining_days = max(0, (end_of_month.date() - current_date.date()).days)
+    return float(last_value + remaining_days * avg_daily_delta)
 
-def create_goals_distribution_histogram(df: pd.DataFrame):
-    if df.empty:
-        if PLOTLY_AVAILABLE:
-            fig = go.Figure(); fig.add_annotation(text="No data available", x=0.5, y=0.5, showarrow=False); return fig
-        return alt.Chart(pd.DataFrame({"note": ["No data available"]})).mark_text().encode(text="note:N")
+def _liquidity_report(daily: pd.DataFrame) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    if daily.empty:
+        return out
+    # Define MTD window from first day of month to latest date available
+    last_date = daily["Date"].max()
+    mtd_start = pd.Timestamp(last_date.year, last_date.month, 1)
+    mtd = daily[(daily["Date"] >= mtd_start) & (daily["Date"] <= last_date)].copy()
+    if mtd.empty:
+        return out
 
-    player_goals = df.groupby(["Player", "Team"])["Goals"].sum().values
-    if PLOTLY_AVAILABLE:
-        fig = go.Figure(
-            data=[go.Histogram(x=player_goals, nbinsx=max(1, len(set(player_goals))), marker_line_color="white", marker_line_width=1.5, opacity=0.85, hovertemplate="<b>%{x} Goals</b><br>%{y} Players<extra></extra>")]
-        )
-        fig.update_layout(
-            title="Distribution of Goals per Player",
-            xaxis_title="Goals per Player",
-            yaxis_title="Number of Players",
-            plot_bgcolor="white",
-            paper_bgcolor="white",
-            font=dict(family="Poppins", size=12),
-            title_font=dict(size=16, color="#1e293b"),
-            xaxis=dict(gridcolor="#f1f5f9", zeroline=False),
-            yaxis=dict(gridcolor="#f1f5f9", zeroline=False),
-            height=400,
-        )
-        return fig
+    # Daily Δ
+    mtd["Delta"] = mtd["TotalLiquidity"].diff()
 
-    hist_df = pd.DataFrame({"Goals": player_goals})
-    return (
-        alt.Chart(hist_df)
-        .mark_bar(opacity=0.85)
-        .encode(
-            x=alt.X("Goals:Q", bin=alt.Bin(maxbins=10), title="Goals per Player"),
-            y=alt.Y("count():Q", title="Number of Players"),
-            tooltip=[alt.Tooltip("Goals:Q", bin=True, title="Goals"), alt.Tooltip("count():Q", title="Players")],
-        )
-        .properties(title="Distribution of Goals per Player", height=400)
-    )
+    out["opening"] = float(mtd["TotalLiquidity"].iloc[0])
+    out["current"] = float(mtd["TotalLiquidity"].iloc[-1])
+    out["change_since_open"] = out["current"] - out["opening"]
+    out["change_since_open_pct"] = (out["change_since_open"] / out["opening"] * 100.0) if out["opening"] else float("nan")
+    out["avg_daily_delta"] = float(mtd["Delta"].dropna().mean()) if mtd["Delta"].notna().any() else float("nan")
+    out["volatility"] = float(mtd["Delta"].dropna().std(ddof=0)) if mtd["Delta"].notna().any() else float("nan")
+    out["proj_eom"] = _project_eom(last_date, out["current"], out["avg_daily_delta"])
 
-# ====================== UI COMPONENTS =============================
-def display_metric_cards(stats: dict):
-    c1, c2, c3 = st.columns(3)
-    c1.markdown(f"""<div class="metric-container"><div style="font-size:2.5rem;font-weight:700;color:#0ea5e9;margin-bottom:.5rem;">{stats['total_goals']}</div><div style="color:#64748b;font-weight:500;text-transform:uppercase;letter-spacing:.05em;">TOTAL GOALS</div></div>""", unsafe_allow_html=True)
-    c2.markdown(f"""<div class="metric-container"><div style="font-size:2.5rem;font-weight:700;color:#0ea5e9;margin-bottom:.5rem;">{stats['total_players']}</div><div style="color:#64748b;font-weight:500;text-transform:uppercase;letter-spacing:.05em;">PLAYERS</div></div>""", unsafe_allow_html=True)
-    c3.markdown(f"""<div class="metric-container"><div style="font-size:2.5rem;font-weight:700;color:#0ea5e9;margin-bottom:.5rem;">{stats['total_teams']}</div><div style="color:#64748b;font-weight:500;text-transform:uppercase;letter-spacing:.05em;">TEAMS</div></div>""", unsafe_allow_html=True)
-
-def display_insights_cards(df: pd.DataFrame, scope: str = "Tournament"):
-    if df.empty:
-        st.info("📊 No data available for insights.")
-        return
-
-    stats = calculate_tournament_stats(df)
-    top_perf = get_top_performers(df, 5)
-    division_cmp = create_division_comparison(df)
-
-    if not top_perf["teams"].empty:
-        tt = top_perf["teams"].iloc[0]
-        top_team_name, top_team_goals = tt["Team"], int(tt["Goals"])
+    # Best/Worst day by Δ
+    if mtd["Delta"].notna().any():
+        best_idx = mtd["Delta"].idxmax()
+        worst_idx = mtd["Delta"].idxmin()
+        out["best_day"] = (mtd.loc[best_idx, "Date"].date(), float(mtd.loc[best_idx, "Delta"]))
+        out["worst_day"] = (mtd.loc[worst_idx, "Date"].date(), float(mtd.loc[worst_idx, "Delta"]))
     else:
-        top_team_name, top_team_goals = "—", 0
+        out["best_day"] = out["worst_day"] = (None, float("nan"))
 
-    if not top_perf["players"].empty:
-        tp = top_perf["players"].iloc[0]
-        top_player_name, top_player_team, top_player_goals = tp["Player"], tp["Team"], int(tp["Goals"])
-    else:
-        top_player_name, top_player_team, top_player_goals = "—", "—", 0
+    out["max_drawdown"] = _max_drawdown(mtd["TotalLiquidity"])
+    out["daily_mtd"] = mtd[["Date","TotalLiquidity","Delta"]].copy()
+    return out
+# ================================================================
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown(
-            f"""
-        <div style="background:white;padding:1.5rem;border-radius:15px;box-shadow:0 4px 20px rgba(0,0,0,.05);border-left:4px solid #0ea5e9;margin-bottom:1rem;">
-            <div style="font-weight:600;color:#0ea5e9;margin-bottom:.5rem;font-size:1.1rem;">🏆 Top Performing Team</div>
-            <div style="color:#374151;line-height:1.5;"><strong>{top_team_name}</strong> leads with <strong>{top_team_goals} goals</strong>.</div>
-        </div>
-        """,
-            unsafe_allow_html=True,
-        )
 
-        if not division_cmp.empty and len(division_cmp) > 1:
-            def get_vals(div):
-                s = division_cmp[division_cmp["Division"] == div]
-                return (int(s["Total_Goals"].iloc[0]), s["Goal_Share_Pct"].iloc[0]) if not s.empty else (0, 0)
-            b_goals, b_pct = get_vals("B Division")
-            a_goals, a_pct = get_vals("A Division")
+# =========================================
+# RENDER HELPERS
+# =========================================
+def branch_status_class(pct: float) -> str:
+    if pct >= 95: return "excellent"
+    if pct >= 85: return "good"
+    if pct >= 75: return "warn"
+    return "danger"
 
-            st.markdown(
-                f"""
-            <div style="background:white;padding:1.5rem;border-radius:15px;box-shadow:0 4px 20px rgba(0,0,0,.05);border-left:4px solid #f59e0b;margin-bottom:1rem;">
-                <div style="font-weight:600;color:#f59e0b;margin-bottom:.5rem;font-size:1.1rem;">🎯 Division Performance</div>
-                <div style="color:#374151;line-height:1.5;">
-                    <strong>B Division:</strong> {b_goals} goals ({b_pct}%)<br>
-                    <strong>A Division:</strong> {a_goals} goals ({a_pct}%)<br>
-                    {"B Division shows higher scoring activity" if b_goals > a_goals else ("A Division leads in goal production" if a_goals > b_goals else "Both divisions are evenly matched")}
-                </div>
-            </div>
-            """,
-                unsafe_allow_html=True,
-            )
 
-    with col2:
-        st.markdown(
-            f"""
-        <div style="background:white;padding:1.5rem;border-radius:15px;box-shadow:0 4px 20px rgba(0,0,0,.05);border-left:4px solid #34d399;margin-bottom:1rem;">
-            <div style="font-weight:600;color:#34d399;margin-bottom:.5rem;font-size:1.1rem;">⚽ Leading Scorer</div>
-            <div style="color:#374151;line-height:1.5;"><strong>{top_player_name}</strong> ({top_player_team}) with <strong>{top_player_goals} goals</strong>.</div>
-        </div>
-        """,
-            unsafe_allow_html=True,
-        )
+def _branch_color_by_name(name: str) -> str:
+    for _, meta in config.BRANCHES.items():
+        if meta.get("name") == name: return meta.get("color", "#6b7280")
+    return "#6b7280"
 
-        player_goals = df.groupby(["Player", "Team"])["Goals"].sum()
-        goals_1 = int((player_goals == 1).sum())
-        goals_2_plus = int((player_goals >= 2).sum())
 
-        st.markdown(
-            f"""
-        <div style="background:white;padding:1.5rem;border-radius:15px;box-shadow:0 4px 20px rgba(0,0,0,.05);border-left:4px solid #a78bfa;margin-bottom:1rem;">
-            <div style="font-weight:600;color:#a78bfa;margin-bottom:.5rem;font-size:1.1rem;">📊 Competition Balance</div>
-            <div style="color:#374151;line-height:1.5;">
-                <strong>{goals_1} players</strong> scored 1 goal, <strong>{goals_2_plus} players</strong> scored 2+ goals<br>
-                {
-                    "Well-balanced competition" if stats['competitive_balance'] < 2
-                    else ("Some teams dominating" if stats['competitive_balance'] > 4 else "Moderate competition spread")
-                }
-            </div>
-        </div>
-        """,
-            unsafe_allow_html=True,
-        )
+def render_branch_cards(bp: pd.DataFrame):
+    st.markdown("### 🏪 Branch Overview")
+    if bp.empty:
+        st.info("No branch summary available."); return
 
-def create_enhanced_data_table(df: pd.DataFrame, table_type: str = "records"):
-    if df.empty:
-        st.info(f"📋 No {table_type} data available with current filters.")
-        return
+    items = list(bp.index)
+    per_row = max(1, int(getattr(config, "CARDS_PER_ROW", 3)))
 
-    if table_type == "records":
-        display_df = df.sort_values("Goals", ascending=False).reset_index(drop=True)
-        st.dataframe(
-            display_df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Division": st.column_config.TextColumn("Division", width="small"),
-                "Team": st.column_config.TextColumn("Team", width="medium"),
-                "Player": st.column_config.TextColumn("Player", width="large"),
-                "Goals": st.column_config.NumberColumn("Goals", format="%d", width="small"),
-            },
-        )
+    for i in range(0, len(items), per_row):
+        row = st.columns(per_row, gap="medium")
+        for j in range(per_row):
+            col_idx = i + j
+            with row[j]:
+                if col_idx >= len(items):
+                    st.empty(); continue
+                br = items[col_idx]
+                r = bp.loc[br]
+                avg_pct = float(np.nanmean([r.get("SalesPercent",0), r.get("NOBPercent",0), r.get("ABVPercent",0)]) or 0)
+                cls = branch_status_class(avg_pct)
+                color = _branch_color_by_name(br)
 
-    elif table_type == "teams":
-        teams_summary = df.groupby(["Team", "Division"]).agg(Players=("Player", "nunique"), Total_Goals=("Goals", "sum")).reset_index()
-        top_rows = []
-        for team in teams_summary["Team"].unique():
-            team_data = df[df["Team"] == team]
-            if team_data.empty:
-                continue
-            s = team_data.groupby("Player")["Goals"].sum()
-            top_rows.append({"Team": team, "Top_Scorer": s.idxmax(), "Top_Scorer_Goals": int(s.max())})
-        top_df = pd.DataFrame(top_rows)
-        teams_display = teams_summary.merge(top_df, on="Team", how="left").sort_values("Total_Goals", ascending=False)
+                st.markdown(
+                    f"""
+                    <div class="card branch-card" style="background: linear-gradient(180deg, {color}1a 0%, #ffffff 40%);">
+                      <div style="display:flex;justify-content:space-between;align-items:center">
+                        <div style="font-weight:800">{br}</div>
+                        <span class="pill {cls}">{avg_pct:.1f}%</span>
+                      </div>
+                      <div style="margin-top:8px;font-size:.92rem;color:#6b7280">Overall score</div>
 
-        st.dataframe(
-            teams_display,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Division": st.column_config.TextColumn("Division", width="small"),
-                "Team": st.column_config.TextColumn("Team", width="medium"),
-                "Players": st.column_config.NumberColumn("Players", format="%d", width="small"),
-                "Total_Goals": st.column_config.NumberColumn("Total Goals", format="%d", width="small"),
-                "Top_Scorer": st.column_config.TextColumn("Top Scorer", width="large"),
-                "Top_Scorer_Goals": st.column_config.NumberColumn("Goals", format="%d", width="small"),
-            },
-        )
-
-    elif table_type == "players":
-        players_summary = df.groupby(["Player", "Team", "Division"])["Goals"].sum().reset_index()
-        players_summary = players_summary.sort_values(["Goals", "Player"], ascending=[False, True])
-        players_summary.insert(0, "Rank", range(1, len(players_summary) + 1))
-        st.dataframe(
-            players_summary,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Rank": st.column_config.NumberColumn("Rank", format="%d", width="small"),
-                "Player": st.column_config.TextColumn("Player", width="large"),
-                "Team": st.column_config.TextColumn("Team", width="medium"),
-                "Division": st.column_config.TextColumn("Division", width="small"),
-                "Goals": st.column_config.NumberColumn("Goals", format="%d", width="small"),
-            },
-        )
-
-def create_comprehensive_zip_report(full_df: pd.DataFrame, filtered_df: pd.DataFrame) -> bytes:
-    zip_buffer = BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as z:
-        if not full_df.empty:
-            z.writestr("01_full_tournament_data.csv", full_df.to_csv(index=False))
-        if not filtered_df.empty:
-            z.writestr("02_filtered_tournament_data.csv", filtered_df.to_csv(index=False))
-            teams = (
-                filtered_df.groupby(["Team", "Division"])
-                .agg(Unique_Players=("Player", "nunique"), Total_Records=("Goals", "count"), Total_Goals=("Goals", "sum"),
-                     Avg_Goals=("Goals", "mean"), Max_Goals=("Goals", "max"))
-                .round(2)
-                .reset_index()
-            )
-            z.writestr("03_teams_detailed_analysis.csv", teams.to_csv(index=False))
-            players = filtered_df.groupby(["Player", "Team", "Division"])["Goals"].sum().reset_index()
-            players = players.sort_values(["Goals", "Player"], ascending=[False, True])
-            players.insert(0, "Rank", range(1, len(players) + 1))
-            z.writestr("04_players_ranking.csv", players.to_csv(index=False))
-            div_cmp = create_division_comparison(filtered_df)
-            if not div_cmp.empty:
-                z.writestr("05_division_comparison.csv", div_cmp.to_csv(index=False))
-            stats = calculate_tournament_stats(filtered_df)
-            z.writestr("06_tournament_statistics.csv", pd.DataFrame([stats]).to_csv(index=False))
-        z.writestr("README.txt", f"ABEER BLUESTAR SOCCER FEST 2K25 - Data Package\nGenerated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-    zip_buffer.seek(0)
-    return zip_buffer.getvalue()
-
-def create_download_section(full_df: pd.DataFrame, filtered_df: pd.DataFrame):
-    st.subheader("📥 Download Reports")
-    st.caption("**Full** = all data ignoring filters, **Filtered** = current view with active filters")
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.subheader("📊 Data Exports")
-        if not full_df.empty:
-            st.download_button(
-                label="⬇️ Download FULL Dataset (CSV)",
-                data=full_df.to_csv(index=False),
-                file_name=f"tournament_full_data_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                mime="text/csv",
-                help="Download complete tournament data",
-            )
-        if not filtered_df.empty:
-            st.download_button(
-                label="⬇️ Download FILTERED Dataset (CSV)",
-                data=filtered_df.to_csv(index=False),
-                file_name=f"tournament_filtered_data_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                mime="text/csv",
-                help="Download data with current filters applied",
-            )
-
-    with col2:
-        st.subheader("🏆 Summary Reports")
-        if not filtered_df.empty:
-            teams_summary = (
-                filtered_df.groupby(["Team", "Division"]).agg(Players_Count=("Player", "nunique"), Total_Goals=("Goals", "sum")).reset_index()
-            ).sort_values("Total_Goals", ascending=False)
-            st.download_button(
-                label="⬇️ Download TEAMS Summary (CSV)",
-                data=teams_summary.to_csv(index=False),
-                file_name=f"teams_summary_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                mime="text/csv",
-                help="Download team performance summary",
-            )
-
-            players_summary = filtered_df.groupby(["Player", "Team", "Division"])["Goals"].sum().reset_index()
-            players_summary = players_summary.sort_values(["Goals", "Player"], ascending=[False, True])
-            players_summary.insert(0, "Rank", range(1, len(players_summary) + 1))
-            st.download_button(
-                label="⬇️ Download PLAYERS Summary (CSV)",
-                data=players_summary.to_csv(index=False),
-                file_name=f"players_summary_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                mime="text/csv",
-                help="Download top scorers summary",
-            )
-
-    with col3:
-        st.subheader("📦 Complete Package")
-        if st.button("📦 Generate Complete Report Package", help="Generate ZIP with all reports and analytics"):
-            z = create_comprehensive_zip_report(full_df, filtered_df)
-            st.download_button(
-                label="⬇️ Download Complete Package (ZIP)",
-                data=z,
-                file_name=f"tournament_complete_package_{datetime.now().strftime('%Y%m%d_%H%M')}.zip",
-                mime="application/zip",
-                help="Download ZIP containing all data, summaries, and analytics",
-            )
-
-# ====================== MAIN APPLICATION ==========================
-def main():
-    inject_advanced_css()
-
-    # Title
-    st.markdown("""
-<div class="app-title">
-  <span class="ball">⚽</span>
-  <span class="title">ABEER BLUESTAR SOCCER FEST 2K25</span>
-</div>
-""", unsafe_allow_html=True)
-
-    # Trophy background (URL or local file)
-    add_world_cup_watermark(
-        image_url="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f3c6.svg",
-        opacity=0.10,
-        size="68vmin",
-        y_offset="6vh"
-    )
-
-    GOOGLE_SHEETS_URL = (
-        "https://docs.google.com/spreadsheets/d/e/"
-        "2PACX-1vRpCD-Wh_NnGQjJ1Mh3tuU5Mdcl8TK41JopMUcSnfqww8wkPXKKgRyg7v4sC_vuUw/pub?output=xlsx"
-    )
-
-    # Sidebar
-    with st.sidebar:
-        st.header("🎛️ Dashboard Controls")
-
-        if st.button("🔄 Refresh Tournament Data", use_container_width=True):
-            st.cache_data.clear()
-            st.session_state["last_refresh"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            notify("Data cache cleared. Reloading…", "ok")
-            st.rerun()
-
-        last_refresh = st.session_state.get("last_refresh", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        st.caption(f"🕒 Last refreshed: {last_refresh}")
-        st.divider()
-
-        # Load data
-        with st.spinner("📡 Loading tournament data…"):
-            tournament_data = fetch_tournament_data(GOOGLE_SHEETS_URL)
-
-        if tournament_data.empty:
-            notify("No tournament data available. Check the published sheet link/permissions.", "err")
-            st.stop()
-
-        full_tournament_data = tournament_data.copy()
-
-        st.header("🔍 Data Filters")
-
-        # Division filter
-        division_options = ["All Divisions"] + sorted(tournament_data["Division"].unique().tolist())
-        selected_division = st.selectbox("📊 Division", division_options, key="division_filter")
-        if selected_division != "All Divisions":
-            tournament_data = tournament_data[tournament_data["Division"] == selected_division]
-
-        # Team filter
-        available_teams = sorted(tournament_data["Team"].unique().tolist())
-        selected_teams = st.multiselect(
-            "🏆 Teams (optional)",
-            available_teams,
-            key="teams_filter",
-            help="Select specific teams to focus on",
-            placeholder="Type to search teams…",
-        )
-        if selected_teams:
-            tournament_data = tournament_data[tournament_data["Team"].isin(selected_teams)]
-
-        # Player search (type-to-search list)
-        st.subheader("👤 Player Search")
-        player_names = sorted(tournament_data["Player"].dropna().astype(str).unique().tolist())
-        selected_players = st.multiselect(
-            "Type to search and select players",
-            options=player_names,
-            default=[],
-            key="players_filter",
-            placeholder="Start typing a player name…",
-            help="Type to search. You can select one or multiple players.",
-        )
-        if selected_players:
-            tournament_data = tournament_data[tournament_data["Player"].isin(selected_players)]
-
-    # Tabs (this first tabs block is sticky via CSS above)
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
-        ["📊 OVERVIEW", "⚡ QUICK INSIGHTS", "🏆 TEAMS", "👤 PLAYERS", "📈 ANALYTICS", "📥 DOWNLOADS"]
-    )
-
-    current_stats = calculate_tournament_stats(tournament_data)
-    top_performers = get_top_performers(tournament_data, 10)
-
-    # TAB 1
-    with tab1:
-        st.header("📊 Tournament Overview")
-        display_metric_cards(current_stats)
-        st.divider()
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            st.subheader("🎯 Goal Scoring Records")
-            create_enhanced_data_table(tournament_data, "records")
-        with col2:
-            if not tournament_data.empty:
-                st.subheader("🏁 Division Distribution")
-                st.altair_chart(create_division_donut_chart(tournament_data), use_container_width=True)
-        if not tournament_data.empty:
-            c1, c2 = st.columns(2)
-            with c1:
-                st.subheader("🏆 Goals by Team")
-                team_goals = tournament_data.groupby("Team")["Goals"].sum().reset_index().sort_values("Goals", ascending=False).head(10)
-                if not team_goals.empty:
-                    st.altair_chart(create_horizontal_bar_chart(team_goals, "Goals", "Team", "Top 10 Teams by Goals", "blues"), use_container_width=True)
-            with c2:
-                st.subheader("⚽ Top Scorers")
-                if not top_performers["players"].empty:
-                    ts = top_performers["players"].head(10).copy()
-                    ts["Display_Name"] = ts["Player"] + " (" + ts["Team"] + ")"
-                    st.altair_chart(create_horizontal_bar_chart(ts, "Goals", "Display_Name", "Top 10 Players by Goals", "greens"), use_container_width=True)
-
-    # TAB 2
-    with tab2:
-        st.header("⚡ Quick Tournament Insights")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("🎯 Total Goals", current_stats["total_goals"])
-        c2.metric("👥 Active Players", current_stats["total_players"])
-        c3.metric("🏆 Teams", current_stats["total_teams"])
-        c4.metric("📊 Divisions", current_stats["divisions"])
-        st.divider()
-        display_insights_cards(tournament_data, "Current View" if len(tournament_data) < len(full_tournament_data) else "Tournament")
-        if tournament_data["Division"].nunique() > 1:
-            st.subheader("🔄 Division Comparison")
-            division_comparison = create_division_comparison(tournament_data)
-            if not division_comparison.empty:
-                st.dataframe(
-                    division_comparison,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Total_Goals": st.column_config.NumberColumn("Total Goals", format="%d"),
-                        "Avg_Goals": st.column_config.NumberColumn("Avg Goals", format="%.2f"),
-                        "Total_Records": st.column_config.NumberColumn("Records", format="%d"),
-                        "Teams": st.column_config.NumberColumn("Teams", format="%d"),
-                        "Players": st.column_config.NumberColumn("Players", format="%d"),
-                        "Goal_Share_Pct": st.column_config.NumberColumn("Share %", format="%.1f%%"),
-                    },
+                      <div class="branch-metrics">
+                        <div>
+                          <div class="label">Sales %</div>
+                          <div class="value">{r.get('SalesPercent',0):.1f}%</div>
+                        </div>
+                        <div>
+                          <div class="label">NOB %</div>
+                          <div class="value">{r.get('NOBPercent',0):.1f}%</div>
+                        </div>
+                        <div>
+                          <div class="label">ABV %</div>
+                          <div class="value">{r.get('ABVPercent',0):.1f}%</div>
+                        </div>
+                      </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
                 )
 
-    # TAB 3
-    with tab3:
-        st.header("🏆 Teams Analysis")
-        if tournament_data.empty:
-            st.info("🔍 No teams match your current filters.")
+
+def render_overview(df: pd.DataFrame, k: Dict[str, Any]):
+    st.markdown("### 🏆 Overall Performance")
+
+    st.markdown('<div class="metrics-row">', unsafe_allow_html=True)
+    c1, c2, c3, c4, c5 = st.columns(5, gap="small")
+
+    c1.metric("💰 Total Sales", f"SAR {k.get('total_sales_actual',0):,.0f}",
+              delta=f"vs Target: {k.get('overall_sales_percent',0):.1f}%")
+
+    variance_color = "normal" if k.get("total_sales_variance",0) >= 0 else "inverse"
+    c2.metric("📊 Sales Variance", f"SAR {k.get('total_sales_variance',0):,.0f}",
+              delta=f"{k.get('overall_sales_percent',0)-100:+.1f}%", delta_color=variance_color)
+
+    nob_color = "normal" if k.get("overall_nob_percent",0) >= config.TARGETS['nob_achievement'] else "inverse"
+    c3.metric("🛍️ Total Baskets", f"{k.get('total_nob_actual',0):,.0f}",
+              delta=f"Achievement: {k.get('overall_nob_percent',0):.1f}%", delta_color=nob_color)
+
+    abv_color = "normal" if k.get("overall_abv_percent",0) >= config.TARGETS['abv_achievement'] else "inverse"
+    c4.metric("💎 Avg Basket Value", f"SAR {k.get('avg_abv_actual',0):,.2f}",
+              delta=f"vs Target: {k.get('overall_abv_percent',0):.1f}%", delta_color=abv_color)
+
+    score_color = "normal" if k.get("performance_score",0) >= 80 else "off"
+    c5.metric("⭐ Performance Score", f"{k.get('performance_score',0):.0f}/100",
+              delta="Weighted Score", delta_color=score_color)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if "branch_performance" in k and not k["branch_performance"].empty:
+        render_branch_cards(k["branch_performance"])
+
+    if "branch_performance" in k and not k["branch_performance"].empty:
+        st.markdown("### 📊 Comparison Table")
+        bp = k["branch_performance"].copy()
+        df_table = (
+            bp[["SalesPercent","NOBPercent","ABVPercent","SalesActual","SalesTarget"]]
+            .rename(columns={"SalesPercent":"Sales %","NOBPercent":"NOB %","ABVPercent":"ABV %",
+                             "SalesActual":"Sales (Actual)","SalesTarget":"Sales (Target)"}).round(1)
+        )
+        styler = (
+            df_table.style
+            .format({"Sales %":"{:,.1f}","NOB %":"{:,.1f}","ABV %":"{:,.1f}",
+                     "Sales (Actual)":"{:,.0f}","Sales (Target)":"{:,.0f}"})
+            .set_table_styles([{"selector":"th","props":[("text-align","center")]}])
+        )
+        st.dataframe(styler, use_container_width=True)
+
+        st.markdown("### 📉 Branch Performance Comparison")
+        st.plotly_chart(_branch_comparison_chart(bp), use_container_width=True, config={"displayModeBar": False})
+
+
+# =============== UPDATED: Liquidity Tab (MTD report model) ===============
+def render_liquidity_tab(df: pd.DataFrame):
+    if df.empty or "Date" not in df or "TotalLiquidity" not in df:
+        st.info("Liquidity columns not found. Include 'TOTAL LIQUIDITY' in your sheet."); return
+
+    daily = _daily_series(df)
+    if daily.empty:
+        st.info("No liquidity rows in the selected range."); return
+
+    # Build MTD analytics
+    rep = _liquidity_report(daily)
+    if not rep:
+        st.info("No MTD data available."); return
+
+    title = "Total Liquidity — MTD"
+    st.markdown(f"### {title}  ↻")
+
+    # Chart (show last ~30 days but honors filter because daily built from filtered df)
+    chart_last = daily.tail(30).copy()
+    st.plotly_chart(_liquidity_total_trend_fig(chart_last, title=""), use_container_width=True, config={"displayModeBar": False})
+
+    # KPI Row 1
+    c1, c2, c3, c4 = st.columns(4, gap="large")
+    c1.metric("Opening (MTD)", f"{_fmt(rep['opening'])}")
+    # Current with green delta like screenshot
+    delta_badge = f"{_fmt(rep['change_since_open'], 0)} ({rep['change_since_open_pct']:.1f}%)" if not np.isnan(rep["change_since_open_pct"]) else "—"
+    c2.metric("Current", f"{_fmt(rep['current'])}", delta=delta_badge)
+    c3.metric("Avg Daily Δ", f"{_fmt(rep['avg_daily_delta'])}")
+    c4.metric("Proj. EOM", f"{_fmt(rep['proj_eom'])}")
+
+    st.markdown("#### Daily Dynamics (MTD)")
+    c5, c6, c7, c8 = st.columns(4, gap="large")
+    # Best / Worst Day
+    best_day, best_val = rep["best_day"]
+    worst_day, worst_val = rep["worst_day"]
+    c5.metric("Best Day", f"{best_day if best_day else '—'}", delta=_fmt(best_val))
+    c6.metric("Worst Day", f"{worst_day if worst_day else '—'}", delta=_fmt(worst_val))
+    # Volatility & Max Drawdown
+    c7.metric("Volatility (σ Δ)", f"{_fmt(rep['volatility'])}")
+    c8.metric("Max Drawdown", f"{_fmt(rep['max_drawdown'])}")
+
+    # Optional small table for transparency
+    with st.expander("Show MTD daily table"):
+        mtd_df = rep["daily_mtd"].copy()
+        mtd_df["Date"] = mtd_df["Date"].dt.date
+        st.dataframe(
+            mtd_df.rename(columns={"TotalLiquidity":"Liquidity", "Delta":"Δ"}),
+            use_container_width=True
+        )
+# ==========================================================================
+
+
+# =========================================
+# MAIN
+# =========================================
+def main():
+    apply_css()
+
+    # Load data
+    sheets_map = load_workbook_from_gsheet(config.DEFAULT_PUBLISHED_URL)
+    if not sheets_map: st.warning("No non-empty sheets found."); st.stop()
+    df_all = process_branch_data(sheets_map)
+    if df_all.empty: st.error("Could not process data. Check column names and sheet structure."); st.stop()
+
+    all_branches = sorted(df_all["BranchName"].dropna().unique()) if "BranchName" in df_all else []
+    if "selected_branches" not in st.session_state:
+        st.session_state.selected_branches = list(all_branches)
+
+    # Sidebar (no All/None buttons)
+    with st.sidebar:
+        st.markdown('<div class="sb-title">📊 <span>AL KHAIR DASHBOARD</span></div>', unsafe_allow_html=True)
+        st.markdown('<div class="sb-subtle">Filters affect all tabs.</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="sb-section">Actions</div>', unsafe_allow_html=True)
+        if st.button("🔄 Refresh Data", use_container_width=True):
+            load_workbook_from_gsheet.clear(); st.rerun()
+        st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="sb-section">Branches</div>', unsafe_allow_html=True)
+        sel: List[str] = []
+        for i, b in enumerate(all_branches):
+            if st.checkbox(b, value=(b in st.session_state.selected_branches), key=f"sb_br_{i}"):
+                sel.append(b)
+        st.session_state.selected_branches = sel
+
+        # Date bounds based on branch filter
+        df_for_bounds = df_all[df_all["BranchName"].isin(st.session_state.selected_branches)].copy() if st.session_state.selected_branches else df_all.copy()
+        if "Date" in df_for_bounds.columns and df_for_bounds["Date"].notna().any():
+            dmin_sb, dmax_sb = df_for_bounds["Date"].min().date(), df_for_bounds["Date"].max().date()
         else:
-            st.subheader("📋 Teams Summary")
-            create_enhanced_data_table(tournament_data, "teams")
-            st.divider()
-            st.subheader("📊 Team Performance Analysis")
-            team_analysis = tournament_data.groupby(["Team", "Division"]).agg(Players=("Player", "nunique"), Goals=("Goals", "sum")).reset_index().sort_values("Goals", ascending=False)
-            if not team_analysis.empty:
-                st.altair_chart(create_horizontal_bar_chart(team_analysis.head(15), "Goals", "Team", "Team Goals Distribution", "viridis"), use_container_width=True)
+            dmin_sb = dmax_sb = datetime.today().date()
 
-    # TAB 4
-    with tab4:
-        st.header("👤 Players Analysis")
-        if tournament_data.empty:
-            st.info("🔍 No players match your current filters.")
+        # Clamp cached values before showing widgets
+        sd_val = st.session_state.get("start_date", dmin_sb)
+        ed_val = st.session_state.get("end_date",   dmax_sb)
+        sd_val = min(max(sd_val, dmin_sb), dmax_sb)
+        ed_val = min(max(ed_val, dmin_sb), dmax_sb)
+        if sd_val > ed_val:
+            sd_val, ed_val = dmin_sb, dmax_sb
+
+        st.markdown('<div class="sb-section">Custom Date</div>', unsafe_allow_html=True)
+        _sd = st.date_input("Start:", value=sd_val, min_value=dmin_sb, max_value=dmax_sb, key="sb_sd")
+        _ed = st.date_input("End:",   value=ed_val, min_value=dmin_sb, max_value=dmax_sb, key="sb_ed")
+
+        st.session_state.start_date = min(max(_sd, dmin_sb), dmax_sb)
+        st.session_state.end_date   = min(max(_ed, dmin_sb), dmax_sb)
+        if st.session_state.start_date > st.session_state.end_date:
+            st.session_state.start_date, st.session_state.end_date = dmin_sb, dmax_sb
+
+    # Hero header
+    st.markdown(
+        f"""
+        <div class="hero">
+          <div class="hero-bar"></div>
+          <div class="hero-title"><span class="hero-emoji">📊</span>{config.PAGE_TITLE}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Apply filters
+    df = df_all.copy()
+    if "BranchName" in df.columns and st.session_state.selected_branches:
+        df = df[df["BranchName"].isin(st.session_state.selected_branches)].copy()
+    if "Date" in df.columns and df["Date"].notna().any():
+        mask = (df["Date"].dt.date >= st.session_state.start_date) & (df["Date"].dt.date <= st.session_state.end_date)
+        df = df.loc[mask].copy()
+        if df.empty: st.warning("No rows in selected date range."); st.stop()
+
+    # Quick Insights (with liquidity info)
+    k = calc_kpis(df)
+    with st.expander("⚡ Quick Insights", expanded=True):
+        insights: List[str] = []
+
+        if "branch_performance" in k and isinstance(k["branch_performance"], pd.DataFrame) and not k["branch_performance"].empty:
+            bp = k["branch_performance"]
+            try:
+                insights.append(f"🥇 Best Sales %: {bp['SalesPercent'].idxmax()} — {bp['SalesPercent'].max():.1f}%")
+                insights.append(f"🔻 Lowest Sales %: {bp['SalesPercent'].idxmin()} — {bp['SalesPercent'].min():.1f}%")
+            except Exception:
+                pass
+            below = bp[bp["SalesPercent"] < config.TARGETS["sales_achievement"]].index.tolist()
+            if below: insights.append("⚠️ Below 95% target: " + ", ".join(below))
+
+        if k.get("total_sales_variance", 0) < 0:
+            insights.append(f"🟥 Overall variance negative by SAR {abs(k['total_sales_variance']):,.0f}")
+
+        if {"TotalLiquidity"}.issubset(df.columns):
+            dliq = df.dropna(subset=["Date","TotalLiquidity"]).copy()
+            if not dliq.empty:
+                by_date = dliq.groupby("Date", as_index=False)["TotalLiquidity"].sum().sort_values("Date")
+                last_date = by_date["Date"].max()
+                cur_val = float(by_date.loc[by_date["Date"] == last_date, "TotalLiquidity"].sum())
+                insights.append(f"💧 Liquidity (latest {last_date.date()}): SAR {cur_val:,.0f}")
+
+                last30 = by_date.tail(30)
+                if len(last30) >= 2:
+                    prev = float(last30["TotalLiquidity"].iloc[-2])
+                    if prev:
+                        trend = (float(last30["TotalLiquidity"].iloc[-1]) - prev) / prev * 100.0
+                        insights.append(f"📈 30-day trend: {trend:+.1f}%")
+
+        st.markdown("\n".join(f"- {line}" for line in insights) if insights else "All metrics look healthy for the current selection.")
+
+    # Tabs
+    t1, t2, t3, t4 = st.tabs(["🏠 Branch Overview", "📈 Daily Trends", "💧 Liquidity", "📥 Export"])
+    with t1:
+        render_overview(df, k)
+
+    with t2:
+        st.markdown("#### Choose Metric")
+        m1, m2, m3 = st.tabs(["💰 Sales", "🛍️ NOB", "💎 ABV"])
+        if "Date" in df.columns and df["Date"].notna().any():
+            opts = ["Last 7 Days", "Last 30 Days", "Last 3 Months", "All Time"]
+            choice = st.selectbox("Time Period", opts, index=1, key="trend_window")
+            today = (df["Date"].max() if df["Date"].notna().any() else pd.Timestamp.today()).date()
+            start = {"Last 7 Days": today - timedelta(days=7),
+                     "Last 30 Days": today - timedelta(days=30),
+                     "Last 3 Months": today - timedelta(days=90)}.get(choice, df["Date"].min().date())
+            f = df[(df["Date"].dt.date >= start) & (df["Date"].dt.date <= today)].copy()
         else:
-            st.subheader("📋 Players Ranking")
-            create_enhanced_data_table(tournament_data, "players")
-            st.divider()
-            c1, c2 = st.columns(2)
-            with c1:
-                st.subheader("🥇 Top Scorers by Division")
-                for division in tournament_data["Division"].unique():
-                    div_data = tournament_data[tournament_data["Division"] == division]
-                    div_top = div_data.groupby(["Player", "Team"])["Goals"].sum().reset_index().sort_values("Goals", ascending=False).head(5)
-                    st.write(f"**{division}**")
-                    if not div_top.empty:
-                        for _, row in div_top.iterrows():
-                            st.write(f"• {row['Player']} ({row['Team']}) — {int(row['Goals'])} goals")
-                    else:
-                        st.write("• No players found")
-                    st.write("")
-            with c2:
-                st.subheader("📊 Player Statistics")
-                player_goals = tournament_data.groupby(["Player", "Team"])["Goals"].sum()
-                st.metric("🎯 Highest Individual Score", int(player_goals.max()) if not player_goals.empty else 0)
-                st.metric("👥 Players with 2+ Goals", int((player_goals >= 2).sum()))
-                st.metric("⚽ Single Goal Scorers", int((player_goals == 1).sum()))
+            f = df.copy()
+        with m1: st.plotly_chart(_metric_area(f, "SalesActual", "Daily Sales (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
+        with m2: st.plotly_chart(_metric_area(f, "NOBActual", "Number of Baskets (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
+        with m3: st.plotly_chart(_metric_area(f, "ABVActual", "Average Basket Value (Actual vs Target)"), use_container_width=True, config={"displayModeBar": False})
 
-    # TAB 5
-    with tab5:
-        st.header("📈 Advanced Analytics")
-        if tournament_data.empty:
-            st.info("🔍 No data available for analytics with current filters.")
+    with t3:
+        render_liquidity_tab(df)
+
+    with t4:
+        if df.empty:
+            st.info("No data to export.")
         else:
-            c1, c2 = st.columns(2)
-            with c1:
-                st.subheader("📊 Goals Distribution")
-                dist = create_goals_distribution_histogram(tournament_data)
-                (st.plotly_chart if PLOTLY_AVAILABLE else st.altair_chart)(dist, use_container_width=True)
-            with c2:
-                st.subheader("🎯 Team Performance Matrix")
-                scatter = create_advanced_scatter_plot(tournament_data)
-                (st.plotly_chart if PLOTLY_AVAILABLE else st.altair_chart)(scatter, use_container_width=True)
-            st.divider()
-            st.subheader("🔍 Detailed Performance Metrics")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.markdown("**🏆 Top Teams (Total Goals)**")
-                tg = tournament_data.groupby("Team")["Goals"].sum().sort_values(ascending=False).head(5)
-                for team, g in tg.items():
-                    st.write(f"• **{team}**: {int(g)} goals")
-            with c2:
-                st.markdown("**⚽ Scoring Patterns**")
-                counts = tournament_data["Goals"].value_counts().sort_index()
-                for g, c in counts.items():
-                    pct = (c / len(tournament_data) * 100)
-                    st.write(f"• **{int(g)} goal{'s' if g != 1 else ''}**: {int(c)} records ({pct:.1f}%)")
-            with c3:
-                st.markdown("**🎯 Division Insights**")
-                for division in tournament_data["Division"].unique():
-                    div_data = tournament_data[tournament_data["Division"] == division]
-                    total_goals = int(div_data["Goals"].sum())
-                    unique_players = int(div_data["Player"].nunique())
-                    st.write(f"• **{division}**:")
-                    st.write(f"  - {total_goals} total goals")
-                    st.write(f"  - {unique_players} unique players")
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+                df.to_excel(writer, sheet_name="All Branches", index=False)
+                if "branch_performance" in k and isinstance(k["branch_performance"], pd.DataFrame):
+                    k["branch_performance"].to_excel(writer, sheet_name="Branch Summary")
+            st.download_button(
+                "📊 Download Excel Report",
+                buf.getvalue(),
+                f"Alkhair_Branch_Analytics_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+            st.download_button(
+                "📄 Download CSV",
+                df.to_csv(index=False).encode("utf-8"),
+                f"Alkhair_Branch_Data_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
 
-    # TAB 6
-    with tab6:
-        create_download_section(full_tournament_data, tournament_data)
 
-# ====================== ENTRY POINT ===============================
 if __name__ == "__main__":
-    if "last_refresh" not in st.session_state:
-        st.session_state["last_refresh"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         main()
     except Exception as e:
-        st.error(f"🚨 Application Error: {e}")
         st.exception(e)
