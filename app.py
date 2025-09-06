@@ -626,7 +626,7 @@ def calc_kpis(df: pd.DataFrame) -> Dict[str, Any]:
 
 
 # =========================================
-# ENHANCED CHARTS
+# ENHANCED CHARTS (titlefont fixed)
 # =========================================
 def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool = True) -> go.Figure:
     if df.empty or "Date" not in df.columns or df["Date"].isna().all():
@@ -641,7 +641,6 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool 
         agg_func_target = "sum" if y_col != "ABVActual" else "mean"
         daily_target = df.groupby(["Date","BranchName"]).agg({target_col: agg_func_target}).reset_index()
     
-    # Enhanced color palette with gradients
     colors = ["#6366f1", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#14b8a6"]
     
     fig = go.Figure()
@@ -650,7 +649,6 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool 
         d_actual = daily_actual[daily_actual["BranchName"]==br]
         color = colors[i % len(colors)]
         
-        # Add area fill with gradient effect
         fig.add_trace(go.Scatter(
             x=d_actual["Date"], 
             y=d_actual[y_col], 
@@ -663,7 +661,6 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool 
             hovertemplate=f"<b>{br}</b><br>📅 %{{x|%Y-%m-%d}}<br>📊 %{{y:,.0f}}<extra></extra>",
         ))
         
-        # Add target line if available
         if daily_target is not None:
             d_target = daily_target[daily_target["BranchName"]==br]
             fig.add_trace(go.Scatter(
@@ -679,12 +676,13 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool 
     fig.update_layout(
         title=dict(
             text=title,
-            font=dict(size=20, weight=700, color="#1f2937"),
+            font=dict(size=20, color="#1f2937"),
             x=0.5,
             xanchor='center'
         ),
         height=450, 
         showlegend=True,
+        # backgrounds left as-is; remove if you truly want white:
         plot_bgcolor="rgba(0,0,0,0)", 
         paper_bgcolor="rgba(0,0,0,0)",
         legend=dict(
@@ -698,20 +696,18 @@ def _metric_area(df: pd.DataFrame, y_col: str, title: str, *, show_target: bool 
             font=dict(size=12, color="#374151")
         ),
         xaxis=dict(
-            title="Date",
+            title=dict(text="Date", font=dict(color="#374151", size=14)),
             showgrid=True,
             gridcolor="rgba(0,0,0,0.05)",
             gridwidth=1,
             tickfont=dict(color="#6b7280"),
-            titlefont=dict(color="#374151", size=14, weight=600)
         ),
         yaxis=dict(
-            title="Value",
+            title=dict(text="Value", font=dict(color="#374151", size=14)),
             showgrid=True,
             gridcolor="rgba(0,0,0,0.05)",
             gridwidth=1,
             tickfont=dict(color="#6b7280"),
-            titlefont=dict(color="#374151", size=14, weight=600)
         ),
         autosize=True, 
         margin=dict(l=60,r=40,t=80,b=60),
@@ -733,7 +729,6 @@ def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
     x = bp.index.tolist()
     
-    # Enhanced gradient colors
     colors = [
         {"color": "#6366f1", "gradient": "rgba(99, 102, 241, 0.8)"},
         {"color": "#10b981", "gradient": "rgba(16, 185, 129, 0.8)"},
@@ -753,28 +748,26 @@ def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
             hovertemplate=f"<b>%{{x}}</b><br>{label}: %{{y:.1f}}%<extra></extra>",
             text=[f"{val:.1f}%" for val in bp[col].tolist()],
             textposition="auto",
-            textfont=dict(color="white", weight=700)
+            textfont=dict(color="white")
         ))
     
     fig.update_layout(
         barmode="group", 
         title=dict(
             text="Branch Performance Comparison",
-            font=dict(size=20, weight=700, color="#1f2937"),
+            font=dict(size=20, color="#1f2937"),
             x=0.5,
             xanchor='center'
         ),
         xaxis=dict(
-            title="Branch",
-            tickfont=dict(color="#6b7280", size=12),
-            titlefont=dict(color="#374151", size=14, weight=600)
+            title=dict(text="Branch", font=dict(color="#374151", size=14)),
+            tickfont=dict(color="#6b7280", size=12)
         ),
         yaxis=dict(
-            title="Achievement (%)",
+            title=dict(text="Achievement (%)", font=dict(color="#374151", size=14)),
             showgrid=True,
             gridcolor="rgba(0,0,0,0.05)",
-            tickfont=dict(color="#6b7280"),
-            titlefont=dict(color="#374151", size=14, weight=600)
+            tickfont=dict(color="#6b7280")
         ),
         height=420,
         plot_bgcolor="rgba(0,0,0,0)", 
@@ -798,7 +791,6 @@ def _branch_comparison_chart(bp: pd.DataFrame) -> go.Figure:
 def _liquidity_total_trend_fig(daily: pd.DataFrame, title: str) -> go.Figure:
     fig = go.Figure()
     
-    # Create smooth area chart with gradient
     fig.add_trace(go.Scatter(
         x=daily["Date"], 
         y=daily["TotalLiquidity"], 
@@ -814,7 +806,7 @@ def _liquidity_total_trend_fig(daily: pd.DataFrame, title: str) -> go.Figure:
     fig.update_layout(
         title=dict(
             text=title or "Liquidity Trend",
-            font=dict(size=20, weight=700, color="#1f2937"),
+            font=dict(size=20, color="#1f2937"),
             x=0.5,
             xanchor='center'
         ),
@@ -823,18 +815,16 @@ def _liquidity_total_trend_fig(daily: pd.DataFrame, title: str) -> go.Figure:
         plot_bgcolor="rgba(0,0,0,0)", 
         paper_bgcolor="rgba(0,0,0,0)",
         xaxis=dict(
-            title="Date",
+            title=dict(text="Date", font=dict(color="#374151", size=14)),
             showgrid=True,
             gridcolor="rgba(0,0,0,0.05)",
             tickfont=dict(color="#6b7280"),
-            title_font=dict(color="#374151", size=14)
         ),
         yaxis=dict(
-            title="Liquidity (SAR)",
+            title=dict(text="Liquidity (SAR)", font=dict(color="#374151", size=14)),
             showgrid=True,
             gridcolor="rgba(0,0,0,0.05)",
             tickfont=dict(color="#6b7280"),
-            title_font=dict(color="#374151", size=14)
         ),
         autosize=True, 
         margin=dict(l=60,r=40,t=80,b=60),
@@ -953,7 +943,6 @@ def render_enhanced_branch_cards(bp: pd.DataFrame):
                 cls = branch_status_class(avg_pct)
                 gradient = _branch_gradient_by_name(br)
                 
-                # Performance indicators
                 sales_indicator = "🟢" if r.get('SalesPercent', 0) >= 95 else "🟡" if r.get('SalesPercent', 0) >= 85 else "🔴"
                 nob_indicator = "🟢" if r.get('NOBPercent', 0) >= 90 else "🟡" if r.get('NOBPercent', 0) >= 80 else "🔴"
                 abv_indicator = "🟢" if r.get('ABVPercent', 0) >= 90 else "🟡" if r.get('ABVPercent', 0) >= 80 else "🔴"
@@ -1000,7 +989,6 @@ def render_enhanced_branch_cards(bp: pd.DataFrame):
 def render_enhanced_overview(df: pd.DataFrame, k: Dict[str, Any]):
     st.markdown("### 🏆 Overall Performance Dashboard")
 
-    # Enhanced metrics row with icons and better formatting
     st.markdown('<div class="metrics-row">', unsafe_allow_html=True)
     c1, c2, c3, c4, c5 = st.columns(5, gap="medium")
 
@@ -1051,11 +1039,9 @@ def render_enhanced_overview(df: pd.DataFrame, k: Dict[str, Any]):
     
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Enhanced branch cards
     if "branch_performance" in k and not k["branch_performance"].empty:
         render_enhanced_branch_cards(k["branch_performance"])
 
-    # Enhanced comparison table
     if "branch_performance" in k and not k["branch_performance"].empty:
         st.markdown("### 📊 Detailed Performance Analysis")
         
@@ -1071,7 +1057,6 @@ def render_enhanced_overview(df: pd.DataFrame, k: Dict[str, Any]):
             }).round(1)
         )
         
-        # Style the dataframe with conditional formatting
         def style_percentage(val):
             if val >= 95:
                 return 'background-color: #dcfce7; color: #166534; font-weight: bold'
@@ -1119,7 +1104,6 @@ def render_enhanced_liquidity_tab(df: pd.DataFrame):
         st.info("💧 No MTD liquidity data available.")
         return
 
-    # Enhanced header with gradient background
     st.markdown(
         """
         <div style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1)); 
@@ -1131,7 +1115,6 @@ def render_enhanced_liquidity_tab(df: pd.DataFrame):
         unsafe_allow_html=True
     )
 
-    # Chart with last 30 days
     chart_last = daily.tail(30).copy()
     st.plotly_chart(
         _liquidity_total_trend_fig(chart_last, "Liquidity Trend (Last 30 Days)"), 
@@ -1139,7 +1122,6 @@ def render_enhanced_liquidity_tab(df: pd.DataFrame):
         config={"displayModeBar": False}
     )
 
-    # Enhanced KPI Row 1
     st.markdown("#### 💰 Key Liquidity Metrics")
     c1, c2, c3, c4 = st.columns(4, gap="large")
     
@@ -1173,7 +1155,6 @@ def render_enhanced_liquidity_tab(df: pd.DataFrame):
             f"SAR {_fmt(rep['proj_eom'])}"
         )
 
-    # Enhanced Daily Dynamics
     st.markdown("#### 📊 Daily Performance Analysis")
     c5, c6, c7, c8 = st.columns(4, gap="large")
     
@@ -1209,7 +1190,6 @@ def render_enhanced_liquidity_tab(df: pd.DataFrame):
             delta_color="inverse" if rep.get('max_drawdown', 0) < 0 else "off"
         )
 
-    # Enhanced MTD table
     with st.expander("📋 Show MTD Daily Breakdown", expanded=False):
         mtd_df = rep["daily_mtd"].copy()
         mtd_df["Date"] = mtd_df["Date"].dt.date
@@ -1233,7 +1213,6 @@ def render_enhanced_liquidity_tab(df: pd.DataFrame):
 def main():
     apply_css()
 
-    # Loading state
     with st.spinner('🔄 Loading Al Khair dashboard...'):
         sheets_map = load_workbook_from_gsheet(config.DEFAULT_PUBLISHED_URL)
     
@@ -1250,7 +1229,6 @@ def main():
     if "selected_branches" not in st.session_state:
         st.session_state.selected_branches = list(all_branches)
 
-    # Enhanced Sidebar
     with st.sidebar:
         st.markdown(
             '''
@@ -1268,7 +1246,6 @@ def main():
             load_workbook_from_gsheet.clear()
             st.rerun()
         
-        # Enhanced branch selection with select all/none
         st.markdown('<div class="sb-section">🏪 Branch Selection</div>', unsafe_allow_html=True)
         
         col1, col2 = st.columns(2)
@@ -1288,7 +1265,6 @@ def main():
                 sel.append(b)
         st.session_state.selected_branches = sel
 
-        # Date selection with better bounds handling
         df_for_bounds = df_all[df_all["BranchName"].isin(st.session_state.selected_branches)].copy() if st.session_state.selected_branches else df_all.copy()
         if "Date" in df_for_bounds.columns and df_for_bounds["Date"].notna().any():
             dmin_sb, dmax_sb = df_for_bounds["Date"].min().date(), df_for_bounds["Date"].max().date()
@@ -1304,7 +1280,6 @@ def main():
 
         st.markdown('<div class="sb-section">📅 Date Range</div>', unsafe_allow_html=True)
         
-        # Quick date presets
         col1, col2 = st.columns(2)
         with col1:
             if st.button("📅 This Month", use_container_width=True):
@@ -1327,7 +1302,6 @@ def main():
         if st.session_state.start_date > st.session_state.end_date:
             st.session_state.start_date, st.session_state.end_date = dmin_sb, dmax_sb
 
-        # Data summary in sidebar
         st.markdown('<div class="sb-hr"></div>', unsafe_allow_html=True)
         st.markdown('<div class="sb-section">📊 Data Summary</div>', unsafe_allow_html=True)
         
@@ -1343,7 +1317,6 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    # Enhanced Hero Header
     st.markdown(
         f"""
         <div class="hero">
@@ -1357,7 +1330,6 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # Apply filters
     df = df_all.copy()
     if "BranchName" in df.columns and st.session_state.selected_branches:
         df = df[df["BranchName"].isin(st.session_state.selected_branches)].copy()
@@ -1368,10 +1340,8 @@ def main():
             st.warning("⚠️ No data found in selected date range. Please adjust your filters.")
             st.stop()
 
-    # Calculate KPIs
     k = calc_kpis(df)
 
-    # Enhanced Quick Insights with better styling
     with st.expander("⚡ Smart Insights & Alerts", expanded=True):
         insights: List[str] = []
         alerts: List[str] = []
@@ -1395,7 +1365,6 @@ def main():
         elif k.get("total_sales_variance", 0) > 0:
             insights.append(f"💰 **Revenue Surplus**: SAR {k['total_sales_variance']:,.0f} above target")
 
-        # Liquidity insights
         if {"TotalLiquidity"}.issubset(df.columns):
             dliq = df.dropna(subset=["Date","TotalLiquidity"]).copy()
             if not dliq.empty:
@@ -1410,14 +1379,12 @@ def main():
                     elif change < -5:
                         alerts.append(f"💧 **Liquidity Drop**: {change:.1f}% decrease (SAR {last_val:,.0f})")
 
-        # Performance score insights
         score = k.get("performance_score", 0)
         if score >= 90:
             insights.append(f"🌟 **Excellent Performance**: {score:.0f}/100 overall score")
         elif score < 70:
             alerts.append(f"⚠️ **Performance Alert**: {score:.0f}/100 overall score needs improvement")
 
-        # Display insights with better formatting
         if insights or alerts:
             col1, col2 = st.columns([1, 1])
             
@@ -1435,7 +1402,6 @@ def main():
         else:
             st.markdown("📊 All metrics are within normal ranges for the selected period.")
 
-    # Enhanced Tabs with better icons
     tab1, tab2, tab3, tab4 = st.tabs([
         "🏠 Executive Dashboard", 
         "📈 Trends & Analytics", 
@@ -1449,7 +1415,6 @@ def main():
     with tab2:
         st.markdown("### 📈 Performance Trends Analysis")
         
-        # Time period selector with better UI
         col1, col2 = st.columns([2, 1])
         with col1:
             st.markdown("#### 📊 Select Metric to Analyze")
@@ -1457,7 +1422,6 @@ def main():
             time_options = ["Last 7 Days", "Last 30 Days", "Last 3 Months", "All Available Data"]
             selected_period = st.selectbox("📅 Time Period", time_options, index=1, key="trend_window")
         
-        # Filter data based on selected period
         if "Date" in df.columns and df["Date"].notna().any():
             today = (df["Date"].max() if df["Date"].notna().any() else pd.Timestamp.today()).date()
             period_map = {
@@ -1471,7 +1435,6 @@ def main():
         else:
             trend_df = df.copy()
         
-        # Metric tabs with enhanced charts
         m1, m2, m3 = st.tabs(["💰 Sales Performance", "🛍️ Basket Analytics", "💎 Value Analysis"])
         
         with m1:
@@ -1480,8 +1443,6 @@ def main():
                 use_container_width=True, 
                 config={"displayModeBar": False}
             )
-            
-            # Additional sales insights
             if not trend_df.empty and "SalesActual" in trend_df.columns:
                 total_sales = trend_df["SalesActual"].sum()
                 avg_daily = trend_df.groupby("Date")["SalesActual"].sum().mean()
@@ -1497,7 +1458,6 @@ def main():
                 use_container_width=True, 
                 config={"displayModeBar": False}
             )
-            
             if not trend_df.empty and "NOBActual" in trend_df.columns:
                 total_baskets = trend_df["NOBActual"].sum()
                 avg_daily_baskets = trend_df.groupby("Date")["NOBActual"].sum().mean()
@@ -1513,7 +1473,6 @@ def main():
                 use_container_width=True, 
                 config={"displayModeBar": False}
             )
-            
             if not trend_df.empty and "ABVActual" in trend_df.columns:
                 avg_abv = trend_df["ABVActual"].mean()
                 max_abv = trend_df["ABVActual"].max()
@@ -1540,17 +1499,13 @@ def main():
                 st.markdown("#### 📈 Excel Report")
                 st.markdown("Complete analytics report with all sheets and summaries")
                 
-                # Create enhanced Excel export
                 buf = io.BytesIO()
                 with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
-                    # Main data
                     df.to_excel(writer, sheet_name="Raw Data", index=False)
                     
-                    # Branch performance summary
                     if "branch_performance" in k and isinstance(k["branch_performance"], pd.DataFrame):
                         k["branch_performance"].to_excel(writer, sheet_name="Branch Summary")
                     
-                    # Daily aggregates
                     if "Date" in df.columns:
                         daily_agg = df.groupby("Date").agg({
                             "SalesActual": "sum",
@@ -1584,7 +1539,6 @@ def main():
                     use_container_width=True
                 )
             
-            # Export summary
             st.markdown("---")
             st.markdown("#### 📋 Export Summary")
             col1, col2, col3 = st.columns(3)
