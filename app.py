@@ -505,7 +505,6 @@ def _liquidity_total_trend_fig(daily: pd.DataFrame, title: str) -> go.Figure:
     ))
     
     fig.update_layout(
-    fig.update_layout(
         title=dict(text=title or "Liquidity Trend", font=dict(size=20, color="#1f2937"), x=0.5),
         height=450, 
         showlegend=False,
@@ -525,7 +524,7 @@ def _liquidity_total_trend_fig(daily: pd.DataFrame, title: str) -> go.Figure:
             tickfont=dict(color="#6b7280"),
             title_font=dict(color="#374151", size=14)
         ),
-        margin=dict(l=60,r=40,t=80,b=60),
+        margin=dict(l=60, r=40, t=80, b=60),
     )
     return fig
 
@@ -903,3 +902,4 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         st.exception(e)
+
