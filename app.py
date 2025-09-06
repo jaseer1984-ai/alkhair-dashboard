@@ -827,14 +827,14 @@ def _liquidity_total_trend_fig(daily: pd.DataFrame, title: str) -> go.Figure:
             showgrid=True,
             gridcolor="rgba(0,0,0,0.05)",
             tickfont=dict(color="#6b7280"),
-            titlefont=dict(color="#374151", size=14, weight=600)
+            title_font=dict(color="#374151", size=14)
         ),
         yaxis=dict(
             title="Liquidity (SAR)",
             showgrid=True,
             gridcolor="rgba(0,0,0,0.05)",
             tickfont=dict(color="#6b7280"),
-            titlefont=dict(color="#374151", size=14, weight=600)
+            title_font=dict(color="#374151", size=14)
         ),
         autosize=True, 
         margin=dict(l=60,r=40,t=80,b=60),
