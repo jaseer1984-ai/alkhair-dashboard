@@ -72,7 +72,7 @@ st.markdown("""
 
 # ===================== TITLE =====================
 st.markdown('<h1 class="main-header">📊 Sales Performance Dashboard</h1>', unsafe_allow_html=True)
-st.markdown("**Real-time insights** • **Advanced analytics** • **Export ready**")
+# (Subtitle removed as requested)
 
 # ===================== FILE UPLOAD =====================
 uploaded_file = st.file_uploader(
@@ -160,30 +160,27 @@ def build_kpis(df_):
         "nob_gap": nob_gap,
     }
 
-# 🔧 UPDATED GAUGE FUNCTION (with center text)
+# 🔧 Gauge with center text
 def create_gauge_chart(value, target, title):
     """
     Create a donut-style gauge with percentage text in the center.
     """
     pct = (value / target * 100) if target > 0 else 0
 
-    # Clamp for visualization (title will still show real %)
     pct_for_gauge = max(0, min(pct, 100))
 
-    # Color based on performance
     if pct >= 100:
-        color = "#38ef7d"          # green
+        color = "#38ef7d"
     elif pct < 80:
-        color = "#f5576c"          # red
+        color = "#f5576c"
     else:
-        color = "#ffc107"          # amber
+        color = "#ffc107"
 
     gauge_data = pd.DataFrame([
         {"category": "Achieved", "value": pct_for_gauge},
         {"category": "Remaining", "value": max(0, 100 - pct_for_gauge)},
     ])
 
-    # Donut chart
     base = alt.Chart(gauge_data).mark_arc(innerRadius=55).encode(
         theta=alt.Theta("value:Q", stack=True),
         color=alt.Color(
@@ -197,7 +194,6 @@ def create_gauge_chart(value, target, title):
         tooltip=["category:N", "value:Q"],
     )
 
-    # Center text with percentage
     text_df = pd.DataFrame({"label": [f"{pct:.1f}%"]})
     text = alt.Chart(text_df).mark_text(
         fontSize=18,
@@ -266,7 +262,7 @@ if df_filtered.empty:
     st.warning("⚠️ No data matches your filters")
     st.stop()
 
-st.caption(f"📊 **{len(df_filtered):,}** records | {start_date} to {end_date} | {len(selected_branches)} branch(es)")
+# (Caption with "4 records | ..." removed as requested)
 
 # ===================== KPI SECTION =====================
 st.markdown("### 🎯 Performance Overview")
@@ -558,4 +554,4 @@ with export_col2:
 
 # ===================== FOOTER =====================
 st.markdown("---")
-st.caption("📊 Sales Performance Dashboard | Data updated in real-time | Built with Streamlit")
+st.caption("📊 Sales Performance Dashboard | Built with Streamlit")
