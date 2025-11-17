@@ -159,7 +159,12 @@ def build_kpis(df_):
         "overall_pct": overall_pct,
     }
 
+# arrow html helper
 def arrow_html(pct_diff: float) -> str:
+    """
+    Returns HTML for green up arrow or red down arrow with % vs target.
+    pct_diff = achievement% - 100
+    """
     if pd.isna(pct_diff):
         return ""
     if pct_diff >= 0:
@@ -167,7 +172,11 @@ def arrow_html(pct_diff: float) -> str:
     else:
         return f'<span style="color:#e5534b; font-weight:600;">▼ {abs(pct_diff):.1f}% vs target</span>'
 
+# 🔧 Gauge with center text
 def create_gauge_chart(value, target):
+    """
+    Create a donut-style gauge with percentage text in the center.
+    """
     pct = (value / target * 100) if target > 0 else 0
     pct_for_gauge = max(0, min(pct, 100))
 
@@ -216,6 +225,7 @@ def create_gauge_chart(value, target):
 # ===================== SIDEBAR FILTERS =====================
 st.sidebar.header("🔎 Filters & Settings")
 
+# ---- 2 separate date pickers ----
 min_date = df["DATE"].min().date()
 max_date = df["DATE"].max().date()
 
@@ -237,6 +247,7 @@ if start_date > end_date:
     st.sidebar.error("From date cannot be after To date")
     st.stop()
 
+# ---- Branch radio selection ----
 branches_all = sorted(df["BRANCH"].dropna().unique())
 st.sidebar.subheader("🏢 Branch")
 
@@ -401,7 +412,47 @@ if show_alerts:
     else:
         st.success("✅ No critical alerts! All metrics are on track.")
 
-# ===================== TREND ANALYSIS (DATE ONLY ON X-AXIS) =====================
+# ===================== TOP/BOTTOM PERFORMERS =====================
+st.markdown("### 🏆 Branch Performance Rankings")
+
+perf_col1, perf_col2 = st.columns(2)
+
+branch_summary = df_filtered.groupby("BRANCH").agg({
+    "Sales Target": "sum",
+    "Sales Achieved": "sum",
+    "NOB Target": "sum",
+    "NOB Achieved": "sum"
+}).reset_index()
+
+branch_summary["Sales Achievement %"] = (branch_summary["Sales Achieved"] / branch_summary["Sales Target"] * 100).fillna(0)
+branch_summary["NOB Achievement %"] = (branch_summary["NOB Achieved"] / branch_summary["NOB Target"] * 100).fillna(0)
+branch_summary = branch_summary.sort_values("Sales Achievement %", ascending=False)
+
+with perf_col1:
+    st.markdown("#### 🥇 Top 3 Performers (Sales)")
+    top3 = branch_summary.head(3)
+    for _, row in top3.iterrows():
+        st.markdown(f"""
+        <div class="insight-box">
+        <strong>{row['BRANCH']}</strong><br>
+        Achievement: {row['Sales Achievement %']:.1f}% | 
+        Sales: {format_number(row['Sales Achieved'])}
+        </div>
+        """, unsafe_allow_html=True)
+
+with perf_col2:
+    st.markdown("#### 📉 Bottom 3 Performers (Sales)")
+    bottom3 = branch_summary.tail(3)
+    for _, row in bottom3.iterrows():
+        st.markdown(f"""
+        <div class="alert-box">
+        <strong>{row['BRANCH']}</strong><br>
+        Achievement: {row['Sales Achievement %']:.1f}% | 
+        Gap: {format_number(row['Sales Target'] - row['Sales Achieved'])}
+        </div>
+        """, unsafe_allow_html=True)
+
+# ===================== TREND ANALYSIS =====================
 if show_trends:
     st.markdown("### 📈 Trend Analysis")
 
@@ -411,16 +462,11 @@ if show_trends:
     }).reset_index()
 
     daily_trend["Achievement %"] = (daily_trend["Sales Achieved"] / daily_trend["Sales Target"] * 100).fillna(0)
-    # 👉 Use pure date (no time) for x-axis
-    daily_trend["DATE_ONLY"] = daily_trend["DATE"].dt.date
-    daily_trend["DATE_STR"] = daily_trend["DATE"].dt.strftime("%Y-%m-%d")
 
     trend_chart = alt.Chart(daily_trend).mark_line(point=True).encode(
-        x=alt.X("DATE_ONLY:O",
-                title="Date",
-                axis=alt.Axis(labelAngle=-45)),
+        x=alt.X("DATE:T", title="Date"),
         y=alt.Y("Achievement %:Q", title="Sales Achievement %"),
-        tooltip=["DATE_STR:N", "Achievement %:Q", "Sales Achieved:Q", "Sales Target:Q"]
+        tooltip=["DATE:T", "Achievement %:Q", "Sales Achieved:Q", "Sales Target:Q"]
     ).properties(
         height=300,
         title="Daily Sales Achievement Trend"
