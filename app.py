@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 
 # Page configuration
 st.set_page_config(page_title="Daily MTD Dashboard", layout="wide")
@@ -34,9 +33,16 @@ if uploaded_file:
     ]
 
     # KPI Calculations
-    sales_pct = (filtered_df["Sales Achieved"].sum() / filtered_df["Sales Target"].sum() * 100) if filtered_df["Sales Target"].sum() > 0 else 0
-    abv_pct = (filtered_df["ABV Achieved"].sum() / filtered_df["ABV Target"].sum() * 100) if filtered_df["ABV Target"].sum() > 0 else 0
-    nob_pct = (filtered_df["NOB Achieved"].sum() / filtered_df["NOB Target"].sum() * 100) if filtered_df["NOB Target"].sum() > 0 else 0
+    sales_target = filtered_df["Sales Target"].sum()
+    sales_achieved = filtered_df["Sales Achieved"].sum()
+    abv_target = filtered_df["ABV Target"].sum()
+    abv_achieved = filtered_df["ABV Achieved"].sum()
+    nob_target = filtered_df["NOB Target"].sum()
+    nob_achieved = filtered_df["NOB Achieved"].sum()
+
+    sales_pct = (sales_achieved / sales_target * 100) if sales_target > 0 else 0
+    abv_pct = (abv_achieved / abv_target * 100) if abv_target > 0 else 0
+    nob_pct = (nob_achieved / nob_target * 100) if nob_target > 0 else 0
 
     # Function for color indicator
     def color_for_kpi(value):
@@ -50,27 +56,31 @@ if uploaded_file:
     # KPI Cards
     st.subheader("📈 Key Performance Indicators")
     col1, col2, col3 = st.columns(3)
-    col1.metric(f"{color_for_kpi(sales_pct)} Sales Achieved", f"{filtered_df['Sales Achieved'].sum():,.0f}", f"{sales_pct:.1f}%")
-    col2.metric(f"{color_for_kpi(abv_pct)} ABV Achieved", f"{filtered_df['ABV Achieved'].sum():,.0f}", f"{abv_pct:.1f}%")
-    col3.metric(f"{color_for_kpi(nob_pct)} NOB Achieved", f"{filtered_df['NOB Achieved'].sum():,.0f}", f"{nob_pct:.1f}%")
+    col1.metric(f"{color_for_kpi(sales_pct)} Sales Achieved", f"{sales_achieved:,.0f}", f"{sales_pct:.1f}%")
+    col2.metric(f"{color_for_kpi(abv_pct)} ABV Achieved", f"{abv_achieved:,.0f}", f"{abv_pct:.1f}%")
+    col3.metric(f"{color_for_kpi(nob_pct)} NOB Achieved", f"{nob_achieved:,.0f}", f"{nob_pct:.1f}%")
 
     st.markdown("---")
 
-    # Bar Charts
-    st.plotly_chart(px.bar(filtered_df, x="Brand", y=["Sales Target", "Sales Achieved"], barmode="group",
-                           title="Sales Target vs Achieved", color_discrete_sequence=["#636EFA", "#EF553B"]), use_container_width=True)
-    st.plotly_chart(px.bar(filtered_df, x="Brand", y=["ABV Target", "ABV Achieved"], barmode="group",
-                           title="ABV Target vs Achieved", color_discrete_sequence=["#00CC96", "#AB63FA"]), use_container_width=True)
-    st.plotly_chart(px.bar(filtered_df, x="Brand", y=["NOB Target", "NOB Achieved"], barmode="group",
-                           title="NOB Target vs Achieved", color_discrete_sequence=["#FFA15A", "#19D3F3"]), use_container_width=True)
+    # Progress Bars
+    st.subheader("📊 Progress Toward Targets")
+    st.write("Sales Progress")
+    st.progress(int(sales_pct))
+    st.write("ABV Progress")
+    st.progress(int(abv_pct))
+    st.write("NOB Progress")
+    st.progress(int(nob_pct))
 
-    # Trend Line Chart
-    st.subheader("📅 Daily Performance Trend")
-    trend_df = filtered_df.groupby("Date")[["Sales Achieved", "ABV Achieved", "NOB Achieved"]].sum().reset_index()
-    fig_trend = px.line(trend_df, x="Date", y=["Sales Achieved", "ABV Achieved", "NOB Achieved"],
-                        title="Daily Achieved Trend", markers=True)
-    fig_trend.update_xaxes(dtick="D")
-    st.plotly_chart(fig_trend, use_container_width=True)
+    st.markdown("---")
+
+    # Styled Table with Conditional Formatting
+    st.subheader("📋 Detailed Performance Table")
+    styled_df = filtered_df.style.format({
+        "Sales %": "{:.1%}",
+        "ABV %": "{:.1%}",
+        "NOB %": "{:.1%}"
+    }).applymap(lambda v: 'color: green' if isinstance(v, (int, float)) and v >= 0.9 else 'color: red', subset=['Sales %','ABV %','NOB %'])
+    st.dataframe(styled_df)
 
     # Download filtered data
     st.download_button("Download Filtered Data", filtered_df.to_csv(index=False), "filtered_data.csv", "text/csv")
