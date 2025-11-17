@@ -1,13 +1,6 @@
 # app.py — Enhanced Professional Sales Dashboard
 # ==============================================
-# ✨ Premium Features:
-#   - Modern UI with custom styling
-#   - Advanced visualizations (gauges, trends, heatmaps)
-#   - Export functionality
-#   - Top/Bottom performers
-#   - Performance alerts
-#   - Enhanced insights
-#
+# ✨ Modern UI, KPI cards, gauges, alerts, daily/monthly reports
 # 🧪 Run: streamlit run app.py
 
 import pandas as pd
@@ -51,23 +44,32 @@ st.markdown("""
     .kpi-card {
         background-color: #ffffff;
         border-radius: 10px;
-        padding: 1rem 1.2rem;
+        padding: 0.9rem 1.0rem;
         box-shadow: 0 2px 6px rgba(0,0,0,0.06);
         border: 1px solid #f0f0f0;
-        height: 150px;
+        height: 120px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.75rem;
+    }
+    .kpi-left {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
     .kpi-title {
         font-size: 0.9rem;
         font-weight: 600;
         color: #555555;
-        margin-bottom: 0.4rem;
+        margin-bottom: 0.3rem;
     }
     .kpi-main {
-        font-size: 1.6rem;
+        font-size: 1.5rem;
         font-weight: 700;
-        margin-bottom: 0.2rem;
     }
-    .kpi-sub {
+    .kpi-right {
+        text-align: right;
         font-size: 0.8rem;
         color: #777777;
     }
@@ -172,6 +174,7 @@ def arrow_html(pct_diff: float) -> str:
     Returns HTML for green up arrow or red down arrow with % vs target.
     pct_diff = achievement% - 100
     """
+    import pandas as pd
     if pd.isna(pct_diff):
         return ""
     if pct_diff >= 0:
@@ -288,7 +291,7 @@ if df_filtered.empty:
     st.warning("⚠️ No data matches your filters")
     st.stop()
 
-# ===================== KPI SECTION (KPI cards, with arrows) =====================
+# ===================== KPI SECTION (KPI cards, compact, right-side details) =====================
 st.markdown("### 🎯 Performance Overview")
 
 kpis = build_kpis(df_filtered)
@@ -302,9 +305,11 @@ with kpi_col1:
     st.markdown(
         f"""
         <div class="kpi-card">
-            <div class="kpi-title">Sales Performance</div>
-            <div class="kpi-main">{format_number(kpis['sales_achieved'])}</div>
-            <div class="kpi-sub">
+            <div class="kpi-left">
+                <div class="kpi-title">Sales Performance</div>
+                <div class="kpi-main">{format_number(kpis['sales_achieved'])}</div>
+            </div>
+            <div class="kpi-right">
                 Target: <span class="kpi-highlight">{format_number(kpis['sales_target'])}</span><br>
                 Achievement: <span class="kpi-highlight">{format_percent(kpis['sales_ach_pct'])}</span><br>
                 {arrow_html(sales_delta_pct)}
@@ -318,9 +323,11 @@ with kpi_col2:
     st.markdown(
         f"""
         <div class="kpi-card">
-            <div class="kpi-title">NOB Performance</div>
-            <div class="kpi-main">{format_number(kpis['nob_achieved'], 0)}</div>
-            <div class="kpi-sub">
+            <div class="kpi-left">
+                <div class="kpi-title">NOB Performance</div>
+                <div class="kpi-main">{format_number(kpis['nob_achieved'], 0)}</div>
+            </div>
+            <div class="kpi-right">
                 Target: <span class="kpi-highlight">{format_number(kpis['nob_target'], 0)}</span><br>
                 Achievement: <span class="kpi-highlight">{format_percent(kpis['nob_ach_pct'])}</span><br>
                 {arrow_html(nob_delta_pct)}
@@ -335,9 +342,11 @@ with kpi_col3:
     st.markdown(
         f"""
         <div class="kpi-card">
-            <div class="kpi-title">Sales Gap</div>
-            <div class="kpi-main">{format_number(abs(kpis['sales_gap']))}</div>
-            <div class="kpi-sub">
+            <div class="kpi-left">
+                <div class="kpi-title">Sales Gap</div>
+                <div class="kpi-main">{format_number(abs(kpis['sales_gap']))}</div>
+            </div>
+            <div class="kpi-right">
                 Status: <span class="kpi-highlight">{sales_gap_label}</span><br>
                 Total Sales: <span class="kpi-highlight">{format_number(kpis['sales_achieved'])}</span>
             </div>
@@ -350,9 +359,11 @@ with kpi_col4:
     st.markdown(
         f"""
         <div class="kpi-card">
-            <div class="kpi-title">Overall Achievement</div>
-            <div class="kpi-main">{format_percent(kpis['overall_pct'])}</div>
-            <div class="kpi-sub">
+            <div class="kpi-left">
+                <div class="kpi-title">Overall Achievement</div>
+                <div class="kpi-main">{format_percent(kpis['overall_pct'])}</div>
+            </div>
+            <div class="kpi-right">
                 Sales %: <span class="kpi-highlight">{format_percent(kpis['sales_ach_pct'])}</span><br>
                 NOB %: <span class="kpi-highlight">{format_percent(kpis['nob_ach_pct'])}</span>
             </div>
