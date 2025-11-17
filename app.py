@@ -1,100 +1,375 @@
-import streamlit as st
+# app.py — Sales Dashboard for INPUT DATA.xlsx
+# -------------------------------------------
+# ✅ Features:
+#    - Date range filter
+#    - Branch filter
+#    - Daily report (by DATE & BRANCH)
+#    - Monthly report (by Month & BRANCH)
+#    - Actual vs Target (tables + charts)
+#    - Quick Insights section
+#    - Numbers formatted with commas
+#
+# 📂 Files required in same folder:
+#    - app.py
+#    - INPUT DATA.xlsx
+#
+# How to run locally:
+#    1) pip install streamlit pandas altair
+#    2) streamlit run app.py
+
 import pandas as pd
+import streamlit as st
+import altair as alt
 
-# Page configuration
-st.set_page_config(page_title="Daily & MTD Dashboard", layout="wide")
-st.title("📊 Daily & MTD Dashboard")
+# ---------- CONFIG ----------
+st.set_page_config(
+    page_title="Sales Dashboard",
+    layout="wide",
+)
 
-# Upload Excel file
-uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
-if uploaded_file:
-    # Read and clean data
-    df = pd.read_excel(uploaded_file, sheet_name="Daily Input", engine="openpyxl")
-    df = df.dropna(subset=["Brand"])
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
+# ---------- DATA LOADER ----------
+@st.cache_data
+def load_data():
+    # Excel file must be in same directory as this app
+    df = pd.read_excel("INPUT DATA.xlsx")
+    # Clean up
+    df["DATE"] = pd.to_datetime(df["DATE"])
+    df["BRANCH"] = df["BRANCH"].astype(str).str.strip()
+    df["Month"] = df["DATE"].dt.to_period("M").astype(str)  # e.g. '2025-11'
+    return df
 
-    # Sidebar Filters
-    st.sidebar.header("Filters")
-    min_date, max_date = df["Date"].min(), df["Date"].max()
-    date_range = st.sidebar.date_input("Select Date Range", [min_date, max_date])
+df = load_data()
 
-    # Handle single or range selection safely
-    if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
-        start_date, end_date = date_range
-    else:
-        start_date = end_date = date_range
+if df.empty:
+    st.error("No data found in INPUT DATA.xlsx")
+    st.stop()
 
-    brands = st.sidebar.multiselect("Select Brands", df["Brand"].unique(), default=df["Brand"].unique())
+# ---------- SIDEBAR FILTERS ----------
+st.sidebar.title("Filters")
 
-    # Apply filters
-    filtered_df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date) & (df["Brand"].isin(brands))]
+min_date = df["DATE"].min().date()
+max_date = df["DATE"].max().date()
 
-    # DAILY DATA (last selected date)
-    daily_df = df[(df["Date"] == end_date) & (df["Brand"].isin(brands))]
+date_range = st.sidebar.date_input(
+    "Select date range",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date,
+)
 
-    # ✅ MTD DATA (month of end_date)
-    mtd_df = df[(pd.to_datetime(df["Date"]).dt.month == pd.to_datetime(end_date).month) & (df["Brand"].isin(brands))]
-
-    # KPI Calculation function
-    def calc_kpis(data):
-        sales_target = data["Sales Target"].sum()
-        sales_achieved = data["Sales Achieved"].sum()
-        abv_target = data["ABV Target"].sum()
-        abv_achieved = data["ABV Achieved"].sum()
-        nob_target = data["NOB Target"].sum()
-        nob_achieved = data["NOB Achieved"].sum()
-
-        sales_pct = (sales_achieved / sales_target * 100) if sales_target > 0 else 0
-        abv_pct = (abv_achieved / abv_target * 100) if abv_target > 0 else 0
-        nob_pct = (nob_achieved / nob_target * 100) if nob_target > 0 else 0
-
-        return sales_achieved, sales_pct, abv_achieved, abv_pct, nob_achieved, nob_pct
-
-    # Color indicator
-    def color_for_kpi(value):
-        if value >= 90:
-            return "✅"
-        elif value >= 70:
-            return "🟠"
-        else:
-            return "🔴"
-
-    # Tabs for Daily vs MTD
-    tab1, tab2 = st.tabs(["📅 Daily View", "📆 MTD View"])
-
-    # DAILY VIEW
-    with tab1:
-        st.subheader(f"Daily KPIs ({end_date})")
-        d_sales, d_sales_pct, d_abv, d_abv_pct, d_nob, d_nob_pct = calc_kpis(daily_df)
-        col1, col2, col3 = st.columns(3)
-        col1.metric(f"{color_for_kpi(d_sales_pct)} Sales", f"{d_sales:,.0f}", f"{d_sales_pct:.1f}%")
-        col2.metric(f"{color_for_kpi(d_abv_pct)} ABV", f"{d_abv:,.0f}", f"{d_abv_pct:.1f}%")
-        col3.metric(f"{color_for_kpi(d_nob_pct)} NOB", f"{d_nob:,.0f}", f"{d_nob_pct:.1f}%")
-
-        st.write("Progress")
-        st.progress(int(d_sales_pct))
-        st.progress(int(d_abv_pct))
-        st.progress(int(d_nob_pct))
-
-        st.dataframe(daily_df)
-
-    # MTD VIEW
-    with tab2:
-        st.subheader(f"MTD KPIs (Month of {end_date})")
-        m_sales, m_sales_pct, m_abv, m_abv_pct, m_nob, m_nob_pct = calc_kpis(mtd_df)
-        col1, col2, col3 = st.columns(3)
-        col1.metric(f"{color_for_kpi(m_sales_pct)} Sales", f"{m_sales:,.0f}", f"{m_sales_pct:.1f}%")
-        col2.metric(f"{color_for_kpi(m_abv_pct)} ABV", f"{m_abv:,.0f}", f"{m_abv_pct:.1f}%")
-        col3.metric(f"{color_for_kpi(m_nob_pct)} NOB", f"{m_nob:,.0f}", f"{m_nob_pct:.1f}%")
-
-        st.write("Progress")
-        st.progress(int(m_sales_pct))
-        st.progress(int(m_abv_pct))
-        st.progress(int(m_nob_pct))
-
-        st.dataframe(mtd_df)
-
-    # Download filtered data
-    st.download_button("Download Filtered Data", filtered_df.to_csv(index=False), "filtered_data.csv", "text/csv")
+if isinstance(date_range, tuple) or isinstance(date_range, list):
+    start_date, end_date = date_range
 else:
-    st.info("Please upload an Excel file to view the dashboard.")
+    # If user selects single date
+    start_date = date_range
+    end_date = date_range
+
+branches = sorted(df["BRANCH"].dropna().unique())
+selected_branches = st.sidebar.multiselect(
+    "Select branch(es)",
+    options=branches,
+    default=branches,
+)
+
+report_type = st.sidebar.radio(
+    "Report Type",
+    options=["Daily", "Monthly"],
+    index=0,
+)
+
+# ---------- APPLY FILTERS ----------
+mask = (
+    (df["DATE"].dt.date >= start_date)
+    & (df["DATE"].dt.date <= end_date)
+    & (df["BRANCH"].isin(selected_branches))
+)
+
+df_filtered = df.loc[mask].copy()
+
+if df_filtered.empty:
+    st.warning("No data for the selected filters.")
+    st.stop()
+
+# ---------- HELPER FUNCTIONS ----------
+def safe_sum(series):
+    return series.fillna(0).sum()
+
+def format_number(x, decimals=2):
+    if pd.isna(x):
+        return "-"
+    return f"{x:,.{decimals}f}"
+
+def build_kpis(df_):
+    total_sales_target = safe_sum(df_["Sales Target"])
+    total_sales_ach = safe_sum(df_["Sales Achieved"])
+    total_nob_target = safe_sum(df_["NOB Target"])
+    total_nob_ach = safe_sum(df_["NOB Achieved"])
+    total_mtd_target = safe_sum(df_["MTD Sales Target"])
+    total_mtd_ach = safe_sum(df_["MTD Sales Achieved"])
+
+    sales_ach_pct = (total_sales_ach / total_sales_target * 100) if total_sales_target > 0 else 0
+    nob_ach_pct = (total_nob_ach / total_nob_target * 100) if total_nob_target > 0 else 0
+    mtd_ach_pct = (total_mtd_ach / total_mtd_target * 100) if total_mtd_target > 0 else 0
+
+    return {
+        "total_sales_target": total_sales_target,
+        "total_sales_ach": total_sales_ach,
+        "sales_ach_pct": sales_ach_pct,
+        "total_nob_target": total_nob_target,
+        "total_nob_ach": total_nob_ach,
+        "nob_ach_pct": nob_ach_pct,
+        "total_mtd_target": total_mtd_target,
+        "total_mtd_ach": total_mtd_ach,
+        "mtd_ach_pct": mtd_ach_pct,
+    }
+
+def daily_summary(df_):
+    # Group by DATE & BRANCH
+    grp = df_.groupby(["DATE", "BRANCH"], as_index=False).agg(
+        {
+            "Sales Target": "sum",
+            "Sales Achieved": "sum",
+            "NOB Target": "sum",
+            "NOB Achieved": "sum",
+            "ABV Target": "mean",
+            "ABV Achieved": "mean",
+        }
+    )
+    grp["Sales Gap"] = grp["Sales Achieved"] - grp["Sales Target"]
+    grp["Sales Achievement %"] = grp.apply(
+        lambda r: (r["Sales Achieved"] / r["Sales Target"] * 100) if r["Sales Target"] > 0 else 0,
+        axis=1,
+    )
+    grp["NOB Achievement %"] = grp.apply(
+        lambda r: (r["NOB Achieved"] / r["NOB Target"] * 100) if r["NOB Target"] > 0 else 0,
+        axis=1,
+    )
+    # Sort by DATE then BRANCH
+    grp = grp.sort_values(["DATE", "BRANCH"])
+    return grp
+
+def monthly_summary(df_):
+    grp = df_.groupby(["Month", "BRANCH"], as_index=False).agg(
+        {
+            "Sales Target": "sum",
+            "Sales Achieved": "sum",
+            "NOB Target": "sum",
+            "NOB Achieved": "sum",
+            "ABV Target": "mean",
+            "ABV Achieved": "mean",
+        }
+    )
+    grp["Sales Gap"] = grp["Sales Achieved"] - grp["Sales Target"]
+    grp["Sales Achievement %"] = grp.apply(
+        lambda r: (r["Sales Achieved"] / r["Sales Target"] * 100) if r["Sales Target"] > 0 else 0,
+        axis=1,
+    )
+    grp["NOB Achievement %"] = grp.apply(
+        lambda r: (r["NOB Achieved"] / r["NOB Target"] * 100) if r["NOB Target"] > 0 else 0,
+        axis=1,
+    )
+    grp = grp.sort_values(["Month", "BRANCH"])
+    return grp
+
+def quick_insights(df_):
+    insights = []
+
+    kpis = build_kpis(df_)
+
+    # Overall sales performance
+    diff = kpis["total_sales_ach"] - kpis["total_sales_target"]
+    if diff >= 0:
+        insights.append(
+            f"Overall sales are ABOVE target by {format_number(diff)} "
+            f"({format_number(kpis['sales_ach_pct'])}%)."
+        )
+    else:
+        insights.append(
+            f"Overall sales are BELOW target by {format_number(abs(diff))} "
+            f"({format_number(kpis['sales_ach_pct'])}%)."
+        )
+
+    # NOB performance
+    nob_diff = kpis["total_nob_ach"] - kpis["total_nob_target"]
+    if nob_diff >= 0:
+        insights.append(
+            f"Number of bills (NOB) is ABOVE target by {format_number(nob_diff)} "
+            f"({format_number(kpis['nob_ach_pct'])}%)."
+        )
+    else:
+        insights.append(
+            f"Number of bills (NOB) is BELOW target by {format_number(abs(nob_diff))} "
+            f"({format_number(kpis['nob_ach_pct'])}%)."
+        )
+
+    # Branch wise best/worst
+    if len(df_["BRANCH"].unique()) > 1:
+        branch_perf = df_.groupby("BRANCH", as_index=False).agg(
+            {
+                "Sales Target": "sum",
+                "Sales Achieved": "sum",
+            }
+        )
+        branch_perf["Sales Achievement %"] = branch_perf.apply(
+            lambda r: (r["Sales Achieved"] / r["Sales Target"] * 100)
+            if r["Sales Target"] > 0 else 0,
+            axis=1,
+        )
+        best = branch_perf.sort_values("Sales Achievement %", ascending=False).iloc[0]
+        worst = branch_perf.sort_values("Sales Achievement %", ascending=True).iloc[0]
+
+        insights.append(
+            f"Best performing branch: **{best['BRANCH']}** "
+            f"with {format_number(best['Sales Achievement %'])}% achievement."
+        )
+        insights.append(
+            f"Lowest performing branch: **{worst['BRANCH']}** "
+            f"with {format_number(worst['Sales Achievement %'])}% achievement."
+        )
+
+    return insights
+
+def show_table(df_, title):
+    st.subheader(title)
+
+    # Prepare formatted copy for display
+    df_display = df_.copy()
+    # Format dates as yyyy-mm-dd
+    if "DATE" in df_display.columns:
+        df_display["DATE"] = df_display["DATE"].dt.strftime("%Y-%m-%d")
+
+    num_cols_2d = [
+        c
+        for c in df_display.columns
+        if any(
+            key in c
+            for key in [
+                "Sales Target",
+                "Sales Achieved",
+                "Sales Gap",
+                "NOB Target",
+                "NOB Achieved",
+                "ABV Target",
+                "ABV Achieved",
+            ]
+        )
+    ]
+
+    num_cols_pct = [c for c in df_display.columns if "Achievement %" in c]
+
+    for c in num_cols_2d:
+        df_display[c] = df_display[c].apply(lambda x: format_number(x, 2))
+    for c in num_cols_pct:
+        df_display[c] = df_display[c].apply(lambda x: format_number(x, 2))
+
+    st.dataframe(df_display, use_container_width=True)
+
+# ---------- TITLE ----------
+st.title("📊 Sales Dashboard — Daily & Monthly Reports")
+
+st.caption(
+    f"Filtered from **{start_date}** to **{end_date}** "
+    f"for branch(es): {', '.join(selected_branches)}"
+)
+
+# ---------- KPI SECTION ----------
+st.markdown("### 🔑 Key Metrics (Filtered Period)")
+
+kpis = build_kpis(df_filtered)
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric(
+        "Total Sales Target",
+        format_number(kpis["total_sales_target"]),
+    )
+    st.metric(
+        "Total Sales Achieved",
+        format_number(kpis["total_sales_ach"]),
+        delta=format_number(kpis["total_sales_ach"] - kpis["total_sales_target"]),
+    )
+with col2:
+    st.metric(
+        "Sales Achievement %",
+        f"{format_number(kpis['sales_ach_pct'])}%",
+    )
+    st.metric(
+        "Total NOB Target",
+        format_number(kpis["total_nob_target"], 0),
+    )
+with col3:
+    st.metric(
+        "Total NOB Achieved",
+        format_number(kpis["total_nob_ach"], 0),
+        delta=format_number(kpis["total_nob_ach"] - kpis["total_nob_target"], 0),
+    )
+    st.metric(
+        "MTD Sales Achievement %",
+        f"{format_number(kpis['mtd_ach_pct'])}%",
+    )
+
+# ---------- QUICK INSIGHTS ----------
+st.markdown("### 💡 Quick Insights")
+for line in quick_insights(df_filtered):
+    st.write("• " + line)
+
+st.markdown("---")
+
+# ---------- REPORTS (DAILY / MONTHLY) ----------
+if report_type == "Daily":
+    summary_df = daily_summary(df_filtered)
+    show_table(summary_df, "🗓 Daily Report (by Date & Branch)")
+
+    # Actual vs Target chart (Daily)
+    st.markdown("#### 📈 Daily Sales — Actual vs Target")
+    chart_df = summary_df[["DATE", "BRANCH", "Sales Target", "Sales Achieved"]].copy()
+    chart_df = chart_df.melt(
+        id_vars=["DATE", "BRANCH"],
+        value_vars=["Sales Target", "Sales Achieved"],
+        var_name="Type",
+        value_name="Amount",
+    )
+    chart_df["Amount"] = chart_df["Amount"].fillna(0)
+
+    daily_chart = (
+        alt.Chart(chart_df)
+        .mark_bar()
+        .encode(
+            x="DATE:T",
+            y="Amount:Q",
+            color="Type:N",
+            column="BRANCH:N",
+            tooltip=["DATE:T", "BRANCH:N", "Type:N", "Amount:Q"],
+        )
+        .interactive()
+    )
+    st.altair_chart(daily_chart, use_container_width=True)
+
+else:
+    summary_df = monthly_summary(df_filtered)
+    show_table(summary_df, "📆 Monthly Report (by Month & Branch)")
+
+    # Actual vs Target chart (Monthly)
+    st.markdown("#### 📈 Monthly Sales — Actual vs Target")
+    chart_df = summary_df[["Month", "BRANCH", "Sales Target", "Sales Achieved"]].copy()
+    chart_df = chart_df.melt(
+        id_vars=["Month", "BRANCH"],
+        value_vars=["Sales Target", "Sales Achieved"],
+        var_name="Type",
+        value_name="Amount",
+    )
+    chart_df["Amount"] = chart_df["Amount"].fillna(0)
+
+    monthly_chart = (
+        alt.Chart(chart_df)
+        .mark_bar()
+        .encode(
+            x="Month:N",
+            y="Amount:Q",
+            color="Type:N",
+            column="BRANCH:N",
+            tooltip=["Month:N", "BRANCH:N", "Type:N", "Amount:Q"],
+        )
+        .interactive()
+    )
+    st.altair_chart(monthly_chart, use_container_width=True)
