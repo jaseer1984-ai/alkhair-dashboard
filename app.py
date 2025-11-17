@@ -72,7 +72,7 @@ st.markdown("""
 
 # ===================== TITLE =====================
 st.markdown('<h1 class="main-header">📊 Sales Performance Dashboard</h1>', unsafe_allow_html=True)
-# (Subtitle removed as requested)
+# Subtitle & record caption removed as requested
 
 # ===================== FILE UPLOAD =====================
 uploaded_file = st.file_uploader(
@@ -89,22 +89,23 @@ if not uploaded_file:
 @st.cache_data
 def load_data(file_obj):
     df = pd.read_excel(file_obj)
-    
+
     if "DATE" not in df.columns:
         raise ValueError("Column 'DATE' not found")
-    
+
     df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
     df = df.dropna(subset=["DATE"])
-    
+
     if "BRANCH" not in df.columns:
         raise ValueError("Column 'BRANCH' not found")
-    
+
     df["BRANCH"] = df["BRANCH"].astype(str).str.strip()
     df["Month"] = df["DATE"].dt.to_period("M").astype(str)
     df["YearMonth"] = df["DATE"].dt.strftime("%Y-%m")
     df["DayOfWeek"] = df["DATE"].dt.day_name()
-    
+
     return df
+
 
 try:
     with st.spinner("📊 Loading and processing data..."):
@@ -131,24 +132,19 @@ def format_percent(x):
         return "-"
     return f"{x:.1f}%"
 
-def get_trend_icon(current, previous):
-    if pd.isna(current) or pd.isna(previous) or previous == 0:
-        return "→"
-    return "📈" if current > previous else "📉"
-
 def build_kpis(df_):
     cols = df_.columns
-    
+
     sales_tgt = safe_sum(df_["Sales Target"]) if "Sales Target" in cols else 0
     sales_ach = safe_sum(df_["Sales Achieved"]) if "Sales Achieved" in cols else 0
     nob_tgt = safe_sum(df_["NOB Target"]) if "NOB Target" in cols else 0
     nob_ach = safe_sum(df_["NOB Achieved"]) if "NOB Achieved" in cols else 0
-    
+
     sales_ach_pct = (sales_ach / sales_tgt * 100) if sales_tgt > 0 else 0
     nob_ach_pct = (nob_ach / nob_tgt * 100) if nob_tgt > 0 else 0
     sales_gap = sales_ach - sales_tgt
     nob_gap = nob_ach - nob_tgt
-    
+
     return {
         "sales_target": sales_tgt,
         "sales_achieved": sales_ach,
@@ -160,13 +156,12 @@ def build_kpis(df_):
         "nob_gap": nob_gap,
     }
 
-# 🔧 Gauge with center text
-def create_gauge_chart(value, target, title):
+# 🔧 Gauge with center text, no title inside chart
+def create_gauge_chart(value, target):
     """
     Create a donut-style gauge with percentage text in the center.
     """
     pct = (value / target * 100) if target > 0 else 0
-
     pct_for_gauge = max(0, min(pct, 100))
 
     if pct >= 100:
@@ -207,7 +202,6 @@ def create_gauge_chart(value, target, title):
     chart = (base + text).properties(
         width=160,
         height=160,
-        title=title
     )
 
     return chart
@@ -215,27 +209,43 @@ def create_gauge_chart(value, target, title):
 # ===================== SIDEBAR FILTERS =====================
 st.sidebar.header("🔎 Filters & Settings")
 
+# ---- 2 separate date pickers ----
 min_date = df["DATE"].min().date()
 max_date = df["DATE"].max().date()
 
-date_range = st.sidebar.date_input(
-    "📅 Date Range",
-    value=(min_date, max_date),
+st.sidebar.subheader("📅 Date Range")
+start_date = st.sidebar.date_input(
+    "From",
+    value=min_date,
+    min_value=min_date,
+    max_value=max_date,
+)
+end_date = st.sidebar.date_input(
+    "To",
+    value=max_date,
     min_value=min_date,
     max_value=max_date,
 )
 
-if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
-    start_date, end_date = date_range
-else:
-    start_date = end_date = date_range if not isinstance(date_range, tuple) else date_range[0]
+# Ensure start_date <= end_date
+if start_date > end_date:
+    st.sidebar.error("From date cannot be after To date")
+    st.stop()
 
-branches = sorted(df["BRANCH"].dropna().unique())
-selected_branches = st.sidebar.multiselect(
-    "🏢 Branch(es)",
-    options=branches,
-    default=branches,
+# ---- Branch radio selection ----
+branches_all = sorted(df["BRANCH"].dropna().unique())
+st.sidebar.subheader("🏢 Branch")
+
+branch_choice = st.sidebar.radio(
+    "Select branch",
+    options=["All Branches"] + branches_all,
+    index=0,
 )
+
+if branch_choice == "All Branches":
+    selected_branches = branches_all
+else:
+    selected_branches = [branch_choice]
 
 report_type = st.sidebar.radio(
     "📊 Report Type",
@@ -261,8 +271,6 @@ df_filtered = df.loc[mask].copy()
 if df_filtered.empty:
     st.warning("⚠️ No data matches your filters")
     st.stop()
-
-# (Caption with "4 records | ..." removed as requested)
 
 # ===================== KPI SECTION =====================
 st.markdown("### 🎯 Performance Overview")
@@ -314,18 +322,20 @@ st.markdown("### 📊 Achievement Gauges")
 gauge_col1, gauge_col2, gauge_col3 = st.columns(3)
 
 with gauge_col1:
-    gauge1 = create_gauge_chart(kpis["sales_achieved"], kpis["sales_target"], "Sales")
+    st.markdown("**Sales**")
+    gauge1 = create_gauge_chart(kpis["sales_achieved"], kpis["sales_target"])
     st.altair_chart(gauge1, use_container_width=True)
 
 with gauge_col2:
-    gauge2 = create_gauge_chart(kpis["nob_achieved"], kpis["nob_target"], "NOB")
+    st.markdown("**NOB**")
+    gauge2 = create_gauge_chart(kpis["nob_achieved"], kpis["nob_target"])
     st.altair_chart(gauge2, use_container_width=True)
 
 with gauge_col3:
     overall_pct = (kpis["sales_ach_pct"] + kpis["nob_ach_pct"]) / 2
     st.metric("Overall Score", format_percent(overall_pct))
     st.progress(min(max(overall_pct / 100, 0), 1.0))
-    
+
     if overall_pct >= 100:
         st.success("🎉 Excellent Performance!")
     elif overall_pct >= 90:
@@ -338,28 +348,28 @@ with gauge_col3:
 # ===================== PERFORMANCE ALERTS =====================
 if show_alerts:
     st.markdown("### 🚨 Performance Alerts")
-    
+
     alerts = []
-    
+
     branch_perf = df_filtered.groupby("BRANCH").agg({
         "Sales Target": "sum",
         "Sales Achieved": "sum",
         "NOB Target": "sum",
         "NOB Achieved": "sum"
     }).reset_index()
-    
+
     branch_perf["Sales Ach %"] = (branch_perf["Sales Achieved"] / branch_perf["Sales Target"] * 100).fillna(0)
     branch_perf["NOB Ach %"] = (branch_perf["NOB Achieved"] / branch_perf["NOB Target"] * 100).fillna(0)
-    
+
     for _, row in branch_perf.iterrows():
         if row["Sales Ach %"] < 80:
             alerts.append(f"⚠️ **{row['BRANCH']}** - Sales achievement critically low at {row['Sales Ach %']:.1f}%")
         if row["NOB Ach %"] < 80:
             alerts.append(f"⚠️ **{row['BRANCH']}** - NOB achievement critically low at {row['NOB Ach %']:.1f}%")
-    
+
     if kpis["sales_ach_pct"] < 100:
         alerts.append(f"📊 Overall sales gap: {format_number(abs(kpis['sales_gap']))} below target")
-    
+
     if alerts:
         for alert in alerts[:5]:
             st.markdown(f'<div class="alert-box">{alert}</div>', unsafe_allow_html=True)
@@ -409,14 +419,14 @@ with perf_col2:
 # ===================== TREND ANALYSIS =====================
 if show_trends:
     st.markdown("### 📈 Trend Analysis")
-    
+
     daily_trend = df_filtered.groupby("DATE").agg({
         "Sales Target": "sum",
         "Sales Achieved": "sum"
     }).reset_index()
-    
+
     daily_trend["Achievement %"] = (daily_trend["Sales Achieved"] / daily_trend["Sales Target"] * 100).fillna(0)
-    
+
     trend_chart = alt.Chart(daily_trend).mark_line(point=True).encode(
         x=alt.X("DATE:T", title="Date"),
         y=alt.Y("Achievement %:Q", title="Sales Achievement %"),
@@ -425,12 +435,12 @@ if show_trends:
         height=300,
         title="Daily Sales Achievement Trend"
     ).interactive()
-    
+
     target_line = alt.Chart(pd.DataFrame({'y': [100]})).mark_rule(
         color='red',
         strokeDash=[5, 5]
     ).encode(y='y:Q')
-    
+
     st.altair_chart(trend_chart + target_line, use_container_width=True)
 
 # ===================== DETAILED REPORTS =====================
@@ -444,11 +454,11 @@ if report_type == "Daily":
         "NOB Target": "sum",
         "NOB Achieved": "sum"
     }).reset_index()
-    
+
     daily_data["Sales Gap"] = daily_data["Sales Achieved"] - daily_data["Sales Target"]
     daily_data["Sales Ach %"] = (daily_data["Sales Achieved"] / daily_data["Sales Target"] * 100).fillna(0)
     daily_data["NOB Ach %"] = (daily_data["NOB Achieved"] / daily_data["NOB Target"] * 100).fillna(0)
-    
+
     display_df = daily_data.copy()
     display_df["DATE"] = display_df["DATE"].dt.strftime("%Y-%m-%d")
     display_df["Sales Target"] = display_df["Sales Target"].apply(lambda x: format_number(x))
@@ -458,9 +468,9 @@ if report_type == "Daily":
     display_df["NOB Target"] = display_df["NOB Target"].apply(lambda x: format_number(x, 0))
     display_df["NOB Achieved"] = display_df["NOB Achieved"].apply(lambda x: format_number(x, 0))
     display_df["NOB Ach %"] = display_df["NOB Ach %"].apply(lambda x: format_percent(x))
-    
+
     st.dataframe(display_df, use_container_width=True, height=400)
-    
+
 elif report_type == "Monthly":
     monthly_data = df_filtered.groupby(["Month", "BRANCH"]).agg({
         "Sales Target": "sum",
@@ -468,11 +478,11 @@ elif report_type == "Monthly":
         "NOB Target": "sum",
         "NOB Achieved": "sum"
     }).reset_index()
-    
+
     monthly_data["Sales Gap"] = monthly_data["Sales Achieved"] - monthly_data["Sales Target"]
     monthly_data["Sales Ach %"] = (monthly_data["Sales Achieved"] / monthly_data["Sales Target"] * 100).fillna(0)
     monthly_data["NOB Ach %"] = (monthly_data["NOB Achieved"] / monthly_data["NOB Target"] * 100).fillna(0)
-    
+
     display_df = monthly_data.copy()
     display_df["Sales Target"] = display_df["Sales Target"].apply(lambda x: format_number(x))
     display_df["Sales Achieved"] = display_df["Sales Achieved"].apply(lambda x: format_number(x))
@@ -481,7 +491,7 @@ elif report_type == "Monthly":
     display_df["NOB Target"] = display_df["NOB Target"].apply(lambda x: format_number(x, 0))
     display_df["NOB Achieved"] = display_df["NOB Achieved"].apply(lambda x: format_number(x, 0))
     display_df["NOB Ach %"] = display_df["NOB Ach %"].apply(lambda x: format_percent(x))
-    
+
     st.dataframe(display_df, use_container_width=True, height=400)
 
 else:  # Branch Comparison
@@ -491,17 +501,17 @@ else:  # Branch Comparison
         "NOB Target": "sum",
         "NOB Achieved": "sum"
     }).reset_index()
-    
+
     branch_comp["Sales Ach %"] = (branch_comp["Sales Achieved"] / branch_comp["Sales Target"] * 100).fillna(0)
     branch_comp["NOB Ach %"] = (branch_comp["NOB Achieved"] / branch_comp["NOB Target"] * 100).fillna(0)
     branch_comp = branch_comp.sort_values("Sales Ach %", ascending=False)
-    
+
     heatmap_data = branch_comp[["BRANCH", "Sales Ach %", "NOB Ach %"]].melt(
         id_vars=["BRANCH"],
         var_name="Metric",
         value_name="Achievement %"
     )
-    
+
     heatmap = alt.Chart(heatmap_data).mark_rect().encode(
         x=alt.X("Metric:N", title=None),
         y=alt.Y("BRANCH:N", title="Branch"),
@@ -515,9 +525,9 @@ else:  # Branch Comparison
         height=max(300, len(selected_branches) * 40),
         title="Branch Performance Heatmap"
     )
-    
+
     st.altair_chart(heatmap, use_container_width=True)
-    
+
     display_df = branch_comp.copy()
     display_df["Sales Target"] = display_df["Sales Target"].apply(lambda x: format_number(x))
     display_df["Sales Achieved"] = display_df["Sales Achieved"].apply(lambda x: format_number(x))
@@ -525,7 +535,7 @@ else:  # Branch Comparison
     display_df["NOB Target"] = display_df["NOB Target"].apply(lambda x: format_number(x, 0))
     display_df["NOB Achieved"] = display_df["NOB Achieved"].apply(lambda x: format_number(x, 0))
     display_df["NOB Ach %"] = display_df["NOB Ach %"].apply(lambda x: format_percent(x))
-    
+
     st.dataframe(display_df, use_container_width=True)
 
 # ===================== EXPORT FUNCTIONALITY =====================
@@ -542,9 +552,9 @@ with export_col2:
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_filtered.to_excel(writer, sheet_name='Raw Data', index=False)
         branch_summary.to_excel(writer, sheet_name='Branch Summary', index=False)
-    
+
     output.seek(0)
-    
+
     st.download_button(
         label="📥 Download Excel",
         data=output,
