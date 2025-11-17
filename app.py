@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 
 # Page config
-st.set_page_config(page_title="Daily MTD Dashboard", layout="wide")
+st.set_page_config(page_title="ALKHAIR FAMILY SUPERMARKET", layout="wide")
 
 st.title("📊 Daily MTD Dashboard")
 
@@ -68,3 +68,4 @@ if uploaded_file:
     st.download_button("Download Filtered Data", filtered_df.to_csv(index=False), "filtered_data.csv", "text/csv")
 else:
     st.info("Please upload an Excel file to view the dashboard.")
+
