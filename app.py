@@ -32,8 +32,8 @@ if uploaded_file:
     # DAILY DATA (last selected date)
     daily_df = df[(df["Date"] == end_date) & (df["Brand"].isin(brands))]
 
-    # MTD DATA (month of end_date)
-    mtd_df = df[(pd.to_datetime(df["Date"]).month == pd.to_datetime(end_date).month) & (df["Brand"].isin(brands))]
+    # ✅ MTD DATA (month of end_date)
+    mtd_df = df[(pd.to_datetime(df["Date"]).dt.month == pd.to_datetime(end_date).month) & (df["Brand"].isin(brands))]
 
     # KPI Calculation function
     def calc_kpis(data):
@@ -59,40 +59,39 @@ if uploaded_file:
         else:
             return "🔴"
 
-    # Combined Summary Section
-    st.subheader("📌 Summary: Daily vs MTD")
-    d_sales, d_sales_pct, d_abv, d_abv_pct, d_nob, d_nob_pct = calc_kpis(daily_df)
-    m_sales, m_sales_pct, m_abv, m_abv_pct, m_nob, m_nob_pct = calc_kpis(mtd_df)
+    # Tabs for Daily vs MTD
+    tab1, tab2 = st.tabs(["📅 Daily View", "📆 MTD View"])
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown(f"### Daily KPIs ({end_date})")
-        st.metric(f"{color_for_kpi(d_sales_pct)} Sales", f"{d_sales:,.0f}", f"{d_sales_pct:.1f}%")
-        st.metric(f"{color_for_kpi(d_abv_pct)} ABV", f"{d_abv:,.0f}", f"{d_abv_pct:.1f}%")
-        st.metric(f"{color_for_kpi(d_nob_pct)} NOB", f"{d_nob:,.0f}", f"{d_nob_pct:.1f}%")
-    with col2:
-        st.markdown(f"### MTD KPIs (Month of {end_date})")
-        st.metric(f"{color_for_kpi(m_sales_pct)} Sales", f"{m_sales:,.0f}", f"{m_sales_pct:.1f}%")
-        st.metric(f"{color_for_kpi(m_abv_pct)} ABV", f"{m_abv:,.0f}", f"{m_abv_pct:.1f}%")
-        st.metric(f"{color_for_kpi(m_nob_pct)} NOB", f"{m_nob:,.0f}", f"{m_nob_pct:.1f}%")
-
-    st.markdown("---")
-
-    # Tabs for detailed view
-    tab1, tab2 = st.tabs(["📅 Daily Details", "📆 MTD Details"])
-
+    # DAILY VIEW
     with tab1:
-        st.subheader(f"Daily Progress ({end_date})")
+        st.subheader(f"Daily KPIs ({end_date})")
+        d_sales, d_sales_pct, d_abv, d_abv_pct, d_nob, d_nob_pct = calc_kpis(daily_df)
+        col1, col2, col3 = st.columns(3)
+        col1.metric(f"{color_for_kpi(d_sales_pct)} Sales", f"{d_sales:,.0f}", f"{d_sales_pct:.1f}%")
+        col2.metric(f"{color_for_kpi(d_abv_pct)} ABV", f"{d_abv:,.0f}", f"{d_abv_pct:.1f}%")
+        col3.metric(f"{color_for_kpi(d_nob_pct)} NOB", f"{d_nob:,.0f}", f"{d_nob_pct:.1f}%")
+
+        st.write("Progress")
         st.progress(int(d_sales_pct))
         st.progress(int(d_abv_pct))
         st.progress(int(d_nob_pct))
+
         st.dataframe(daily_df)
 
+    # MTD VIEW
     with tab2:
-        st.subheader(f"MTD Progress (Month of {end_date})")
+        st.subheader(f"MTD KPIs (Month of {end_date})")
+        m_sales, m_sales_pct, m_abv, m_abv_pct, m_nob, m_nob_pct = calc_kpis(mtd_df)
+        col1, col2, col3 = st.columns(3)
+        col1.metric(f"{color_for_kpi(m_sales_pct)} Sales", f"{m_sales:,.0f}", f"{m_sales_pct:.1f}%")
+        col2.metric(f"{color_for_kpi(m_abv_pct)} ABV", f"{m_abv:,.0f}", f"{m_abv_pct:.1f}%")
+        col3.metric(f"{color_for_kpi(m_nob_pct)} NOB", f"{m_nob:,.0f}", f"{m_nob_pct:.1f}%")
+
+        st.write("Progress")
         st.progress(int(m_sales_pct))
         st.progress(int(m_abv_pct))
         st.progress(int(m_nob_pct))
+
         st.dataframe(mtd_df)
 
     # Download filtered data
