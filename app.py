@@ -34,19 +34,6 @@ st.markdown("""
         -webkit-text-fill-color: transparent;
         margin-bottom: 0.5rem;
     }
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.5rem;
-        border-radius: 10px;
-        color: white;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .success-metric {
-        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-    }
-    .warning-metric {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-    }
     .insight-box {
         background-color: #f0f2f6;
         padding: 1rem;
@@ -61,18 +48,38 @@ st.markdown("""
         border-left: 4px solid #ffc107;
         margin: 0.5rem 0;
     }
-    .stMetric {
-        background-color: white;
-        padding: 1rem;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    .kpi-card {
+        background-color: #ffffff;
+        border-radius: 10px;
+        padding: 1rem 1.2rem;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+        border: 1px solid #f0f0f0;
+        height: 140px;
+    }
+    .kpi-title {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #555555;
+        margin-bottom: 0.4rem;
+    }
+    .kpi-main {
+        font-size: 1.6rem;
+        font-weight: 700;
+        margin-bottom: 0.2rem;
+    }
+    .kpi-sub {
+        font-size: 0.8rem;
+        color: #777777;
+    }
+    .kpi-highlight {
+        font-weight: 600;
+        color: #1f77b4;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ===================== TITLE =====================
 st.markdown('<h1 class="main-header">📊 Sales Performance Dashboard</h1>', unsafe_allow_html=True)
-# Subtitle & record caption removed as requested
 
 # ===================== FILE UPLOAD =====================
 uploaded_file = st.file_uploader(
@@ -145,6 +152,8 @@ def build_kpis(df_):
     sales_gap = sales_ach - sales_tgt
     nob_gap = nob_ach - nob_tgt
 
+    overall_pct = (sales_ach_pct + nob_ach_pct) / 2 if (sales_tgt > 0 and nob_tgt > 0) else 0
+
     return {
         "sales_target": sales_tgt,
         "sales_achieved": sales_ach,
@@ -154,6 +163,7 @@ def build_kpis(df_):
         "nob_achieved": nob_ach,
         "nob_ach_pct": nob_ach_pct,
         "nob_gap": nob_gap,
+        "overall_pct": overall_pct,
     }
 
 # 🔧 Gauge with center text, no title inside chart
@@ -227,7 +237,6 @@ end_date = st.sidebar.date_input(
     max_value=max_date,
 )
 
-# Ensure start_date <= end_date
 if start_date > end_date:
     st.sidebar.error("From date cannot be after To date")
     st.stop()
@@ -246,12 +255,6 @@ if branch_choice == "All Branches":
     selected_branches = branches_all
 else:
     selected_branches = [branch_choice]
-
-report_type = st.sidebar.radio(
-    "📊 Report Type",
-    options=["Daily", "Monthly", "Branch Comparison"],
-    index=0,
-)
 
 show_alerts = st.sidebar.checkbox("🚨 Show Performance Alerts", value=True)
 show_trends = st.sidebar.checkbox("📈 Show Trend Analysis", value=True)
@@ -272,50 +275,73 @@ if df_filtered.empty:
     st.warning("⚠️ No data matches your filters")
     st.stop()
 
-# ===================== KPI SECTION =====================
+# ===================== KPI SECTION (KPI cards, aligned) =====================
 st.markdown("### 🎯 Performance Overview")
 
 kpis = build_kpis(df_filtered)
 
-col1, col2, col3, col4 = st.columns(4)
+kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
 
-with col1:
-    delta_color = "normal" if kpis["sales_gap"] >= 0 else "inverse"
-    st.metric(
-        "Sales Achieved",
-        format_number(kpis["sales_achieved"]),
-        delta=format_number(kpis["sales_gap"]),
-        delta_color=delta_color
+with kpi_col1:
+    st.markdown(
+        f"""
+        <div class="kpi-card">
+            <div class="kpi-title">Sales Performance</div>
+            <div class="kpi-main">{format_number(kpis['sales_achieved'])}</div>
+            <div class="kpi-sub">
+                Target: <span class="kpi-highlight">{format_number(kpis['sales_target'])}</span><br>
+                Achievement: <span class="kpi-highlight">{format_percent(kpis['sales_ach_pct'])}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    st.progress(min(max(kpis["sales_ach_pct"] / 100, 0), 1.0))
-    st.caption(f"Target: {format_number(kpis['sales_target'])}")
 
-with col2:
-    st.metric(
-        "Sales Achievement",
-        format_percent(kpis["sales_ach_pct"]),
+with kpi_col2:
+    st.markdown(
+        f"""
+        <div class="kpi-card">
+            <div class="kpi-title">NOB Performance</div>
+            <div class="kpi-main">{format_number(kpis['nob_achieved'], 0)}</div>
+            <div class="kpi-sub">
+                Target: <span class="kpi-highlight">{format_number(kpis['nob_target'], 0)}</span><br>
+                Achievement: <span class="kpi-highlight">{format_percent(kpis['nob_ach_pct'])}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    status = "✅ On Track" if kpis["sales_ach_pct"] >= 100 else "⚠️ Below Target" if kpis["sales_ach_pct"] >= 80 else "🔴 Critical"
-    st.markdown(f"**{status}**")
 
-with col3:
-    delta_color = "normal" if kpis["nob_gap"] >= 0 else "inverse"
-    st.metric(
-        "NOB Achieved",
-        format_number(kpis["nob_achieved"], 0),
-        delta=format_number(kpis["nob_gap"], 0),
-        delta_color=delta_color
+with kpi_col3:
+    sales_gap_label = "Above Target" if kpis["sales_gap"] >= 0 else "Below Target"
+    st.markdown(
+        f"""
+        <div class="kpi-card">
+            <div class="kpi-title">Sales Gap</div>
+            <div class="kpi-main">{format_number(abs(kpis['sales_gap']))}</div>
+            <div class="kpi-sub">
+                Status: <span class="kpi-highlight">{sales_gap_label}</span><br>
+                Total Sales: <span class="kpi-highlight">{format_number(kpis['sales_achieved'])}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    st.progress(min(max(kpis["nob_ach_pct"] / 100, 0), 1.0))
-    st.caption(f"Target: {format_number(kpis['nob_target'], 0)}")
 
-with col4:
-    st.metric(
-        "NOB Achievement",
-        format_percent(kpis["nob_ach_pct"]),
+with kpi_col4:
+    st.markdown(
+        f"""
+        <div class="kpi-card">
+            <div class="kpi-title">Overall Achievement</div>
+            <div class="kpi-main">{format_percent(kpis['overall_pct'])}</div>
+            <div class="kpi-sub">
+                Sales %: <span class="kpi-highlight">{format_percent(kpis['sales_ach_pct'])}</span><br>
+                NOB %: <span class="kpi-highlight">{format_percent(kpis['nob_ach_pct'])}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    status = "✅ On Track" if kpis["nob_ach_pct"] >= 100 else "⚠️ Below Target" if kpis["nob_ach_pct"] >= 80 else "🔴 Critical"
-    st.markdown(f"**{status}**")
 
 # ===================== GAUGE CHARTS =====================
 st.markdown("### 📊 Achievement Gauges")
@@ -332,18 +358,9 @@ with gauge_col2:
     st.altair_chart(gauge2, use_container_width=True)
 
 with gauge_col3:
-    overall_pct = (kpis["sales_ach_pct"] + kpis["nob_ach_pct"]) / 2
-    st.metric("Overall Score", format_percent(overall_pct))
-    st.progress(min(max(overall_pct / 100, 0), 1.0))
-
-    if overall_pct >= 100:
-        st.success("🎉 Excellent Performance!")
-    elif overall_pct >= 90:
-        st.info("👍 Good Performance")
-    elif overall_pct >= 80:
-        st.warning("⚠️ Needs Improvement")
-    else:
-        st.error("🔴 Critical Attention Required")
+    st.markdown("**Overall Score**")
+    st.markdown(f"### {format_percent(kpis['overall_pct'])}")
+    st.progress(min(max(kpis["overall_pct"] / 100, 0), 1.0))
 
 # ===================== PERFORMANCE ALERTS =====================
 if show_alerts:
@@ -445,98 +462,99 @@ if show_trends:
 
 # ===================== DETAILED REPORTS =====================
 st.markdown("---")
-st.markdown(f"### 📑 Detailed {report_type} Report")
+st.markdown("### 📑 Daily Detailed Report")
 
-if report_type == "Daily":
-    daily_data = df_filtered.groupby(["DATE", "BRANCH"]).agg({
-        "Sales Target": "sum",
-        "Sales Achieved": "sum",
-        "NOB Target": "sum",
-        "NOB Achieved": "sum"
-    }).reset_index()
+daily_data = df_filtered.groupby(["DATE", "BRANCH"]).agg({
+    "Sales Target": "sum",
+    "Sales Achieved": "sum",
+    "NOB Target": "sum",
+    "NOB Achieved": "sum"
+}).reset_index()
 
-    daily_data["Sales Gap"] = daily_data["Sales Achieved"] - daily_data["Sales Target"]
-    daily_data["Sales Ach %"] = (daily_data["Sales Achieved"] / daily_data["Sales Target"] * 100).fillna(0)
-    daily_data["NOB Ach %"] = (daily_data["NOB Achieved"] / daily_data["NOB Target"] * 100).fillna(0)
+daily_data["Sales Gap"] = daily_data["Sales Achieved"] - daily_data["Sales Target"]
+daily_data["Sales Ach %"] = (daily_data["Sales Achieved"] / daily_data["Sales Target"] * 100).fillna(0)
+daily_data["NOB Ach %"] = (daily_data["NOB Achieved"] / daily_data["NOB Target"] * 100).fillna(0)
 
-    display_df = daily_data.copy()
-    display_df["DATE"] = display_df["DATE"].dt.strftime("%Y-%m-%d")
-    display_df["Sales Target"] = display_df["Sales Target"].apply(lambda x: format_number(x))
-    display_df["Sales Achieved"] = display_df["Sales Achieved"].apply(lambda x: format_number(x))
-    display_df["Sales Gap"] = display_df["Sales Gap"].apply(lambda x: format_number(x))
-    display_df["Sales Ach %"] = display_df["Sales Ach %"].apply(lambda x: format_percent(x))
-    display_df["NOB Target"] = display_df["NOB Target"].apply(lambda x: format_number(x, 0))
-    display_df["NOB Achieved"] = display_df["NOB Achieved"].apply(lambda x: format_number(x, 0))
-    display_df["NOB Ach %"] = display_df["NOB Ach %"].apply(lambda x: format_percent(x))
+display_df_daily = daily_data.copy()
+display_df_daily["DATE"] = display_df_daily["DATE"].dt.strftime("%Y-%m-%d")
+display_df_daily["Sales Target"] = display_df_daily["Sales Target"].apply(lambda x: format_number(x))
+display_df_daily["Sales Achieved"] = display_df_daily["Sales Achieved"].apply(lambda x: format_number(x))
+display_df_daily["Sales Gap"] = display_df_daily["Sales Gap"].apply(lambda x: format_number(x))
+display_df_daily["Sales Ach %"] = display_df_daily["Sales Ach %"].apply(lambda x: format_percent(x))
+display_df_daily["NOB Target"] = display_df_daily["NOB Target"].apply(lambda x: format_number(x, 0))
+display_df_daily["NOB Achieved"] = display_df_daily["NOB Achieved"].apply(lambda x: format_number(x, 0))
+display_df_daily["NOB Ach %"] = display_df_daily["NOB Ach %"].apply(lambda x: format_percent(x))
 
-    st.dataframe(display_df, use_container_width=True, height=400)
+st.dataframe(display_df_daily, use_container_width=True, height=350)
 
-elif report_type == "Monthly":
-    monthly_data = df_filtered.groupby(["Month", "BRANCH"]).agg({
-        "Sales Target": "sum",
-        "Sales Achieved": "sum",
-        "NOB Target": "sum",
-        "NOB Achieved": "sum"
-    }).reset_index()
+st.markdown("### 📆 Monthly Detailed Report")
 
-    monthly_data["Sales Gap"] = monthly_data["Sales Achieved"] - monthly_data["Sales Target"]
-    monthly_data["Sales Ach %"] = (monthly_data["Sales Achieved"] / monthly_data["Sales Target"] * 100).fillna(0)
-    monthly_data["NOB Ach %"] = (monthly_data["NOB Achieved"] / monthly_data["NOB Target"] * 100).fillna(0)
+monthly_data = df_filtered.groupby(["Month", "BRANCH"]).agg({
+    "Sales Target": "sum",
+    "Sales Achieved": "sum",
+    "NOB Target": "sum",
+    "NOB Achieved": "sum"
+}).reset_index()
 
-    display_df = monthly_data.copy()
-    display_df["Sales Target"] = display_df["Sales Target"].apply(lambda x: format_number(x))
-    display_df["Sales Achieved"] = display_df["Sales Achieved"].apply(lambda x: format_number(x))
-    display_df["Sales Gap"] = display_df["Sales Gap"].apply(lambda x: format_number(x))
-    display_df["Sales Ach %"] = display_df["Sales Ach %"].apply(lambda x: format_percent(x))
-    display_df["NOB Target"] = display_df["NOB Target"].apply(lambda x: format_number(x, 0))
-    display_df["NOB Achieved"] = display_df["NOB Achieved"].apply(lambda x: format_number(x, 0))
-    display_df["NOB Ach %"] = display_df["NOB Ach %"].apply(lambda x: format_percent(x))
+monthly_data["Sales Gap"] = monthly_data["Sales Achieved"] - monthly_data["Sales Target"]
+monthly_data["Sales Ach %"] = (monthly_data["Sales Achieved"] / monthly_data["Sales Target"] * 100).fillna(0)
+monthly_data["NOB Ach %"] = (monthly_data["NOB Achieved"] / monthly_data["NOB Target"] * 100).fillna(0)
 
-    st.dataframe(display_df, use_container_width=True, height=400)
+display_df_monthly = monthly_data.copy()
+display_df_monthly["Sales Target"] = display_df_monthly["Sales Target"].apply(lambda x: format_number(x))
+display_df_monthly["Sales Achieved"] = display_df_monthly["Sales Achieved"].apply(lambda x: format_number(x))
+display_df_monthly["Sales Gap"] = display_df_monthly["Sales Gap"].apply(lambda x: format_number(x))
+display_df_monthly["Sales Ach %"] = display_df_monthly["Sales Ach %"].apply(lambda x: format_percent(x))
+display_df_monthly["NOB Target"] = display_df_monthly["NOB Target"].apply(lambda x: format_number(x, 0))
+display_df_monthly["NOB Achieved"] = display_df_monthly["NOB Achieved"].apply(lambda x: format_number(x, 0))
+display_df_monthly["NOB Ach %"] = display_df_monthly["NOB Ach %"].apply(lambda x: format_percent(x))
 
-else:  # Branch Comparison
-    branch_comp = df_filtered.groupby("BRANCH").agg({
-        "Sales Target": "sum",
-        "Sales Achieved": "sum",
-        "NOB Target": "sum",
-        "NOB Achieved": "sum"
-    }).reset_index()
+st.dataframe(display_df_monthly, use_container_width=True, height=350)
 
-    branch_comp["Sales Ach %"] = (branch_comp["Sales Achieved"] / branch_comp["Sales Target"] * 100).fillna(0)
-    branch_comp["NOB Ach %"] = (branch_comp["NOB Achieved"] / branch_comp["NOB Target"] * 100).fillna(0)
-    branch_comp = branch_comp.sort_values("Sales Ach %", ascending=False)
+st.markdown("### 🧭 Branch Comparison (Achievement %)")
 
-    heatmap_data = branch_comp[["BRANCH", "Sales Ach %", "NOB Ach %"]].melt(
-        id_vars=["BRANCH"],
-        var_name="Metric",
-        value_name="Achievement %"
-    )
+branch_comp = df_filtered.groupby("BRANCH").agg({
+    "Sales Target": "sum",
+    "Sales Achieved": "sum",
+    "NOB Target": "sum",
+    "NOB Achieved": "sum"
+}).reset_index()
 
-    heatmap = alt.Chart(heatmap_data).mark_rect().encode(
-        x=alt.X("Metric:N", title=None),
-        y=alt.Y("BRANCH:N", title="Branch"),
-        color=alt.Color(
-            "Achievement %:Q",
-            scale=alt.Scale(scheme="redyellowgreen", domain=[0, 150]),
-            legend=alt.Legend(title="Achievement %")
-        ),
-        tooltip=["BRANCH:N", "Metric:N", "Achievement %:Q"]
-    ).properties(
-        height=max(300, len(selected_branches) * 40),
-        title="Branch Performance Heatmap"
-    )
+branch_comp["Sales Ach %"] = (branch_comp["Sales Achieved"] / branch_comp["Sales Target"] * 100).fillna(0)
+branch_comp["NOB Ach %"] = (branch_comp["NOB Achieved"] / branch_comp["NOB Target"] * 100).fillna(0)
+branch_comp = branch_comp.sort_values("Sales Ach %", ascending=False)
 
-    st.altair_chart(heatmap, use_container_width=True)
+heatmap_data = branch_comp[["BRANCH", "Sales Ach %", "NOB Ach %"]].melt(
+    id_vars=["BRANCH"],
+    var_name="Metric",
+    value_name="Achievement %"
+)
 
-    display_df = branch_comp.copy()
-    display_df["Sales Target"] = display_df["Sales Target"].apply(lambda x: format_number(x))
-    display_df["Sales Achieved"] = display_df["Sales Achieved"].apply(lambda x: format_number(x))
-    display_df["Sales Ach %"] = display_df["Sales Ach %"].apply(lambda x: format_percent(x))
-    display_df["NOB Target"] = display_df["NOB Target"].apply(lambda x: format_number(x, 0))
-    display_df["NOB Achieved"] = display_df["NOB Achieved"].apply(lambda x: format_number(x, 0))
-    display_df["NOB Ach %"] = display_df["NOB Ach %"].apply(lambda x: format_percent(x))
+heatmap = alt.Chart(heatmap_data).mark_rect().encode(
+    x=alt.X("Metric:N", title=None),
+    y=alt.Y("BRANCH:N", title="Branch"),
+    color=alt.Color(
+        "Achievement %:Q",
+        scale=alt.Scale(scheme="redyellowgreen", domain=[0, 150]),
+        legend=alt.Legend(title="Achievement %")
+    ),
+    tooltip=["BRANCH:N", "Metric:N", "Achievement %:Q"]
+).properties(
+    height=max(300, len(selected_branches) * 40),
+    title="Branch Performance Heatmap"
+)
 
-    st.dataframe(display_df, use_container_width=True)
+st.altair_chart(heatmap, use_container_width=True)
+
+display_df_branch = branch_comp.copy()
+display_df_branch["Sales Target"] = display_df_branch["Sales Target"].apply(lambda x: format_number(x))
+display_df_branch["Sales Achieved"] = display_df_branch["Sales Achieved"].apply(lambda x: format_number(x))
+display_df_branch["Sales Ach %"] = display_df_branch["Sales Ach %"].apply(lambda x: format_percent(x))
+display_df_branch["NOB Target"] = display_df_branch["NOB Target"].apply(lambda x: format_number(x, 0))
+display_df_branch["NOB Achieved"] = display_df_branch["NOB Achieved"].apply(lambda x: format_number(x, 0))
+display_df_branch["NOB Ach %"] = display_df_branch["NOB Ach %"].apply(lambda x: format_percent(x))
+
+st.dataframe(display_df_branch, use_container_width=True, height=350)
 
 # ===================== EXPORT FUNCTIONALITY =====================
 st.markdown("---")
