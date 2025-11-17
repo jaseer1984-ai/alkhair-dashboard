@@ -16,6 +16,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+DATA_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS1uBbW5ikPpRdjh4BVCJJ1IVmEgDdWqDwV-Ilv-GFaVOHkGAbXdHk-K_6VqtBB-A/pub?output=xlsx"
+
 # ===================== CUSTOM CSS =====================
 st.markdown("""
 <style>
@@ -82,22 +84,12 @@ st.markdown("""
 
 # ===================== TITLE =====================
 st.markdown('<h1 class="main-header">📊 Sales Performance Dashboard</h1>', unsafe_allow_html=True)
+st.caption("Data source: Google Sheet ➜ published XLSX link")
 
-# ===================== FILE UPLOAD =====================
-uploaded_file = st.file_uploader(
-    "📁 Upload Excel file (DATE, BRANCH, Sales Target, Sales Achieved, NOB Target, NOB Achieved)",
-    type=["xlsx", "xls"],
-    help="Upload your sales data file to generate insights"
-)
-
-if not uploaded_file:
-    st.info("👆 Upload your Excel file to unlock powerful analytics")
-    st.stop()
-
-# ===================== DATA LOADING =====================
+# ===================== DATA LOADING (from Google Sheet URL) =====================
 @st.cache_data
-def load_data(file_obj):
-    df = pd.read_excel(file_obj)
+def load_data():
+    df = pd.read_excel(DATA_URL)
 
     if "DATE" not in df.columns:
         raise ValueError("Column 'DATE' not found")
@@ -115,12 +107,11 @@ def load_data(file_obj):
 
     return df
 
-
 try:
-    with st.spinner("📊 Loading and processing data..."):
-        df = load_data(uploaded_file)
+    with st.spinner("📊 Loading and processing data from Google Sheets..."):
+        df = load_data()
 except Exception as e:
-    st.error(f"❌ Error: {e}")
+    st.error(f"❌ Error loading data: {e}")
     st.stop()
 
 if df.empty:
@@ -174,7 +165,6 @@ def arrow_html(pct_diff: float) -> str:
     Returns HTML for green up arrow or red down arrow with % vs target.
     pct_diff = achievement% - 100
     """
-    import pandas as pd
     if pd.isna(pct_diff):
         return ""
     if pct_diff >= 0:
@@ -182,7 +172,7 @@ def arrow_html(pct_diff: float) -> str:
     else:
         return f'<span style="color:#e5534b; font-weight:600;">▼ {abs(pct_diff):.1f}% vs target</span>'
 
-# 🔧 Gauge with center text, no title inside chart
+# 🔧 Gauge with center text
 def create_gauge_chart(value, target):
     """
     Create a donut-style gauge with percentage text in the center.
@@ -291,7 +281,7 @@ if df_filtered.empty:
     st.warning("⚠️ No data matches your filters")
     st.stop()
 
-# ===================== KPI SECTION (KPI cards, compact, right-side details) =====================
+# ===================== KPI SECTION =====================
 st.markdown("### 🎯 Performance Overview")
 
 kpis = build_kpis(df_filtered)
