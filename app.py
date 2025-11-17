@@ -54,7 +54,7 @@ st.markdown("""
         padding: 1rem 1.2rem;
         box-shadow: 0 2px 6px rgba(0,0,0,0.06);
         border: 1px solid #f0f0f0;
-        height: 140px;
+        height: 150px;
     }
     .kpi-title {
         font-size: 0.9rem;
@@ -166,6 +166,19 @@ def build_kpis(df_):
         "overall_pct": overall_pct,
     }
 
+# arrow html helper
+def arrow_html(pct_diff: float) -> str:
+    """
+    Returns HTML for green up arrow or red down arrow with % vs target.
+    pct_diff = achievement% - 100
+    """
+    if pd.isna(pct_diff):
+        return ""
+    if pct_diff >= 0:
+        return f'<span style="color:#1a9c5b; font-weight:600;">▲ {pct_diff:.1f}% vs target</span>'
+    else:
+        return f'<span style="color:#e5534b; font-weight:600;">▼ {abs(pct_diff):.1f}% vs target</span>'
+
 # 🔧 Gauge with center text, no title inside chart
 def create_gauge_chart(value, target):
     """
@@ -275,10 +288,13 @@ if df_filtered.empty:
     st.warning("⚠️ No data matches your filters")
     st.stop()
 
-# ===================== KPI SECTION (KPI cards, aligned) =====================
+# ===================== KPI SECTION (KPI cards, with arrows) =====================
 st.markdown("### 🎯 Performance Overview")
 
 kpis = build_kpis(df_filtered)
+
+sales_delta_pct = kpis["sales_ach_pct"] - 100
+nob_delta_pct = kpis["nob_ach_pct"] - 100
 
 kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
 
@@ -290,7 +306,8 @@ with kpi_col1:
             <div class="kpi-main">{format_number(kpis['sales_achieved'])}</div>
             <div class="kpi-sub">
                 Target: <span class="kpi-highlight">{format_number(kpis['sales_target'])}</span><br>
-                Achievement: <span class="kpi-highlight">{format_percent(kpis['sales_ach_pct'])}</span>
+                Achievement: <span class="kpi-highlight">{format_percent(kpis['sales_ach_pct'])}</span><br>
+                {arrow_html(sales_delta_pct)}
             </div>
         </div>
         """,
@@ -305,7 +322,8 @@ with kpi_col2:
             <div class="kpi-main">{format_number(kpis['nob_achieved'], 0)}</div>
             <div class="kpi-sub">
                 Target: <span class="kpi-highlight">{format_number(kpis['nob_target'], 0)}</span><br>
-                Achievement: <span class="kpi-highlight">{format_percent(kpis['nob_ach_pct'])}</span>
+                Achievement: <span class="kpi-highlight">{format_percent(kpis['nob_ach_pct'])}</span><br>
+                {arrow_html(nob_delta_pct)}
             </div>
         </div>
         """,
