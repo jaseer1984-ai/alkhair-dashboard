@@ -6,7 +6,6 @@
 #   - Export functionality
 #   - Top/Bottom performers
 #   - Performance alerts
-#   - YoY comparison
 #   - Enhanced insights
 #
 # 🧪 Run: streamlit run app.py
@@ -161,30 +160,60 @@ def build_kpis(df_):
         "nob_gap": nob_gap,
     }
 
+# 🔧 UPDATED GAUGE FUNCTION (with center text)
 def create_gauge_chart(value, target, title):
-    """Create a gauge chart showing achievement percentage"""
+    """
+    Create a donut-style gauge with percentage text in the center.
+    """
     pct = (value / target * 100) if target > 0 else 0
-    
-    color = "#38ef7d" if pct >= 100 else "#f5576c" if pct < 80 else "#ffc107"
-    
+
+    # Clamp for visualization (title will still show real %)
+    pct_for_gauge = max(0, min(pct, 100))
+
+    # Color based on performance
+    if pct >= 100:
+        color = "#38ef7d"          # green
+    elif pct < 80:
+        color = "#f5576c"          # red
+    else:
+        color = "#ffc107"          # amber
+
     gauge_data = pd.DataFrame([
-        {"category": "Achieved", "value": min(pct, 100)},
-        {"category": "Remaining", "value": max(0, 100 - pct)}
+        {"category": "Achieved", "value": pct_for_gauge},
+        {"category": "Remaining", "value": max(0, 100 - pct_for_gauge)},
     ])
-    
-    chart = alt.Chart(gauge_data).mark_arc(innerRadius=50).encode(
+
+    # Donut chart
+    base = alt.Chart(gauge_data).mark_arc(innerRadius=55).encode(
         theta=alt.Theta("value:Q", stack=True),
-        color=alt.Color("category:N", scale=alt.Scale(
-            domain=["Achieved", "Remaining"],
-            range=[color, "#e0e0e0"]
-        ), legend=None),
-        tooltip=["category:N", "value:Q"]
-    ).properties(
-        width=150,
-        height=150,
-        title=f"{title}: {pct:.1f}%"
+        color=alt.Color(
+            "category:N",
+            scale=alt.Scale(
+                domain=["Achieved", "Remaining"],
+                range=[color, "#e0e0e0"],
+            ),
+            legend=None,
+        ),
+        tooltip=["category:N", "value:Q"],
     )
-    
+
+    # Center text with percentage
+    text_df = pd.DataFrame({"label": [f"{pct:.1f}%"]})
+    text = alt.Chart(text_df).mark_text(
+        fontSize=18,
+        fontWeight="bold"
+    ).encode(
+        text="label:N",
+        x=alt.value(80),
+        y=alt.value(80),
+    )
+
+    chart = (base + text).properties(
+        width=160,
+        height=160,
+        title=title
+    )
+
     return chart
 
 # ===================== SIDEBAR FILTERS =====================
@@ -254,7 +283,7 @@ with col1:
         delta=format_number(kpis["sales_gap"]),
         delta_color=delta_color
     )
-    st.progress(min(kpis["sales_ach_pct"] / 100, 1.0))
+    st.progress(min(max(kpis["sales_ach_pct"] / 100, 0), 1.0))
     st.caption(f"Target: {format_number(kpis['sales_target'])}")
 
 with col2:
@@ -273,7 +302,7 @@ with col3:
         delta=format_number(kpis["nob_gap"], 0),
         delta_color=delta_color
     )
-    st.progress(min(kpis["nob_ach_pct"] / 100, 1.0))
+    st.progress(min(max(kpis["nob_ach_pct"] / 100, 0), 1.0))
     st.caption(f"Target: {format_number(kpis['nob_target'], 0)}")
 
 with col4:
@@ -297,10 +326,9 @@ with gauge_col2:
     st.altair_chart(gauge2, use_container_width=True)
 
 with gauge_col3:
-    # Overall performance gauge
     overall_pct = (kpis["sales_ach_pct"] + kpis["nob_ach_pct"]) / 2
     st.metric("Overall Score", format_percent(overall_pct))
-    st.progress(min(overall_pct / 100, 1.0))
+    st.progress(min(max(overall_pct / 100, 0), 1.0))
     
     if overall_pct >= 100:
         st.success("🎉 Excellent Performance!")
@@ -317,7 +345,6 @@ if show_alerts:
     
     alerts = []
     
-    # Branch-level alerts
     branch_perf = df_filtered.groupby("BRANCH").agg({
         "Sales Target": "sum",
         "Sales Achieved": "sum",
@@ -334,12 +361,11 @@ if show_alerts:
         if row["NOB Ach %"] < 80:
             alerts.append(f"⚠️ **{row['BRANCH']}** - NOB achievement critically low at {row['NOB Ach %']:.1f}%")
     
-    # Overall alerts
     if kpis["sales_ach_pct"] < 100:
         alerts.append(f"📊 Overall sales gap: {format_number(abs(kpis['sales_gap']))} below target")
     
     if alerts:
-        for alert in alerts[:5]:  # Show top 5 alerts
+        for alert in alerts[:5]:
             st.markdown(f'<div class="alert-box">{alert}</div>', unsafe_allow_html=True)
     else:
         st.success("✅ No critical alerts! All metrics are on track.")
@@ -363,7 +389,7 @@ branch_summary = branch_summary.sort_values("Sales Achievement %", ascending=Fal
 with perf_col1:
     st.markdown("#### 🥇 Top 3 Performers (Sales)")
     top3 = branch_summary.head(3)
-    for idx, row in top3.iterrows():
+    for _, row in top3.iterrows():
         st.markdown(f"""
         <div class="insight-box">
         <strong>{row['BRANCH']}</strong><br>
@@ -375,7 +401,7 @@ with perf_col1:
 with perf_col2:
     st.markdown("#### 📉 Bottom 3 Performers (Sales)")
     bottom3 = branch_summary.tail(3)
-    for idx, row in bottom3.iterrows():
+    for _, row in bottom3.iterrows():
         st.markdown(f"""
         <div class="alert-box">
         <strong>{row['BRANCH']}</strong><br>
@@ -404,7 +430,6 @@ if show_trends:
         title="Daily Sales Achievement Trend"
     ).interactive()
     
-    # Add target line at 100%
     target_line = alt.Chart(pd.DataFrame({'y': [100]})).mark_rule(
         color='red',
         strokeDash=[5, 5]
@@ -428,7 +453,6 @@ if report_type == "Daily":
     daily_data["Sales Ach %"] = (daily_data["Sales Achieved"] / daily_data["Sales Target"] * 100).fillna(0)
     daily_data["NOB Ach %"] = (daily_data["NOB Achieved"] / daily_data["NOB Target"] * 100).fillna(0)
     
-    # Format for display
     display_df = daily_data.copy()
     display_df["DATE"] = display_df["DATE"].dt.strftime("%Y-%m-%d")
     display_df["Sales Target"] = display_df["Sales Target"].apply(lambda x: format_number(x))
@@ -453,7 +477,6 @@ elif report_type == "Monthly":
     monthly_data["Sales Ach %"] = (monthly_data["Sales Achieved"] / monthly_data["Sales Target"] * 100).fillna(0)
     monthly_data["NOB Ach %"] = (monthly_data["NOB Achieved"] / monthly_data["NOB Target"] * 100).fillna(0)
     
-    # Format for display
     display_df = monthly_data.copy()
     display_df["Sales Target"] = display_df["Sales Target"].apply(lambda x: format_number(x))
     display_df["Sales Achieved"] = display_df["Sales Achieved"].apply(lambda x: format_number(x))
@@ -477,7 +500,6 @@ else:  # Branch Comparison
     branch_comp["NOB Ach %"] = (branch_comp["NOB Achieved"] / branch_comp["NOB Target"] * 100).fillna(0)
     branch_comp = branch_comp.sort_values("Sales Ach %", ascending=False)
     
-    # Heatmap visualization
     heatmap_data = branch_comp[["BRANCH", "Sales Ach %", "NOB Ach %"]].melt(
         id_vars=["BRANCH"],
         var_name="Metric",
@@ -500,7 +522,6 @@ else:  # Branch Comparison
     
     st.altair_chart(heatmap, use_container_width=True)
     
-    # Table
     display_df = branch_comp.copy()
     display_df["Sales Target"] = display_df["Sales Target"].apply(lambda x: format_number(x))
     display_df["Sales Achieved"] = display_df["Sales Achieved"].apply(lambda x: format_number(x))
@@ -521,7 +542,6 @@ with export_col1:
     st.info("📊 Download current view as Excel file")
 
 with export_col2:
-    # Create Excel file in memory
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_filtered.to_excel(writer, sheet_name='Raw Data', index=False)
