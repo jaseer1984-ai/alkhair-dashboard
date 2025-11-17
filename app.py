@@ -84,7 +84,6 @@ st.markdown("""
 
 # ===================== TITLE =====================
 st.markdown('<h1 class="main-header">📊 Sales Performance Dashboard</h1>', unsafe_allow_html=True)
-st.caption("Data source: Google Sheet ➜ published XLSX link")
 
 # ===================== DATA LOADING (from Google Sheet URL) =====================
 @st.cache_data
@@ -602,3 +601,4 @@ with export_col2:
 # ===================== FOOTER =====================
 st.markdown("---")
 st.caption("📊 Sales Performance Dashboard | Built with Streamlit")
+
