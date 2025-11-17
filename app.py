@@ -2,17 +2,18 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Page config
-st.set_page_config(page_title="ALKHAIR FAMILY SUPERMARKET", layout="wide")
+# Page configuration
+st.set_page_config(page_title="Daily MTD Dashboard", layout="wide")
 
 st.title("📊 Daily MTD Dashboard")
 
 # Upload Excel file
 uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
 if uploaded_file:
+    # Read and clean data
     df = pd.read_excel(uploaded_file, sheet_name="Daily Input", engine="openpyxl")
     df = df.dropna(subset=["Brand"])
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date  # Remove time, keep only date
 
     # Sidebar Filters
     st.sidebar.header("Filters")
@@ -22,16 +23,16 @@ if uploaded_file:
 
     # Apply filters
     filtered_df = df[
-        (df["Date"].between(pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1]))) &
+        (df["Date"].between(date_range[0], date_range[1])) &
         (df["Brand"].isin(brands))
     ]
 
-    # KPI Calculation
+    # KPI Calculations
     sales_pct = (filtered_df["Sales Achieved"].sum() / filtered_df["Sales Target"].sum() * 100) if filtered_df["Sales Target"].sum() > 0 else 0
     abv_pct = (filtered_df["ABV Achieved"].sum() / filtered_df["ABV Target"].sum() * 100) if filtered_df["ABV Target"].sum() > 0 else 0
     nob_pct = (filtered_df["NOB Achieved"].sum() / filtered_df["NOB Target"].sum() * 100) if filtered_df["NOB Target"].sum() > 0 else 0
 
-    # Function for color based on performance
+    # Function for color indicator
     def color_for_kpi(value):
         if value >= 90:
             return "✅"
@@ -62,10 +63,10 @@ if uploaded_file:
     trend_df = filtered_df.groupby("Date")[["Sales Achieved", "ABV Achieved", "NOB Achieved"]].sum().reset_index()
     fig_trend = px.line(trend_df, x="Date", y=["Sales Achieved", "ABV Achieved", "NOB Achieved"],
                         title="Daily Achieved Trend", markers=True)
+    fig_trend.update_xaxes(dtick="D")  # Daily ticks
     st.plotly_chart(fig_trend, use_container_width=True)
 
     # Download filtered data
     st.download_button("Download Filtered Data", filtered_df.to_csv(index=False), "filtered_data.csv", "text/csv")
 else:
     st.info("Please upload an Excel file to view the dashboard.")
-
