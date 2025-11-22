@@ -16,7 +16,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-DATA_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS1uBbW5ikPpRdjh4BVCJJ1IVmEgDdWqDwV-Ilv-GFaVOHkGAbXdHk-K_6VqtBB-A/pub?output=xlsx"
+DATA_URL = "https://docs.google.com/spreadsheets/d/1c_Ihaydv2kwGWg12MYhFmIxpXTuCKUT5/edit?usp=sharing&ouid=116672375799622827695&rtpof=true&sd=true"
 
 # ===================== CUSTOM CSS =====================
 st.markdown("""
@@ -602,3 +602,4 @@ with export_col2:
 # ===================== FOOTER =====================
 st.markdown("---")
 st.caption("📊 Sales Performance Dashboard | Built with Streamlit")
+
