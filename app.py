@@ -93,7 +93,7 @@ def load_data(version: int):
 
 # ---- Sidebar: Data source controls ----
 st.sidebar.subheader("🔄 Data Source")
-if st.sidebar.button("🔁 Refresh data from Google Sheet"):
+if st.sidebar.button("🔁 Refresh data"):
     st.session_state["data_version"] += 1
 
 try:
@@ -585,3 +585,4 @@ with export_col2:
 # ===================== FOOTER =====================
 st.markdown("---")
 st.caption("📊 Sales Performance Dashboard | Built with Streamlit")
+
