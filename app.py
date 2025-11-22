@@ -426,6 +426,7 @@ with perf_col2:
         """, unsafe_allow_html=True)
 
 # ===================== TREND ANALYSIS (DATE ONLY) =====================
+# ===================== TREND ANALYSIS (DATE ONLY) =====================
 if show_trends:
     st.markdown("### 📈 Trend Analysis")
 
@@ -434,14 +435,24 @@ if show_trends:
         "Sales Achieved": "sum"
     }).reset_index()
 
-    daily_trend["Achievement %"] = (daily_trend["Sales Achieved"] / daily_trend["Sales Target"] * 100).fillna(0)
-    daily_trend["DATE_ONLY"] = daily_trend["DATE"].dt.date
-    daily_trend["DATE_STR"] = daily_trend["DATE"].dt.strftime("%Y-%m-%d")
+    daily_trend["Achievement %"] = (
+        daily_trend["Sales Achieved"] / daily_trend["Sales Target"] * 100
+    ).fillna(0)
 
+    # Use temporal type (T) and custom date format on the axis
     trend_chart = alt.Chart(daily_trend).mark_line(point=True).encode(
-        x=alt.X("DATE_ONLY:O", title="Date", axis=alt.Axis(labelAngle=-45)),
+        x=alt.X(
+            "DATE:T",
+            title="Date",
+            axis=alt.Axis(format="%Y-%m-%d", labelAngle=-45)
+        ),
         y=alt.Y("Achievement %:Q", title="Sales Achievement %"),
-        tooltip=["DATE_STR:N", "Achievement %:Q", "Sales Achieved:Q", "Sales Target:Q"]
+        tooltip=[
+            alt.Tooltip("DATE:T", title="Date", format="%Y-%m-%d"),
+            alt.Tooltip("Achievement %:Q", format=".1f"),
+            alt.Tooltip("Sales Achieved:Q", format=","),
+            alt.Tooltip("Sales Target:Q", format=","),
+        ],
     ).properties(
         height=300,
         title="Daily Sales Achievement Trend"
@@ -453,6 +464,7 @@ if show_trends:
     ).encode(y='y:Q')
 
     st.altair_chart(trend_chart + target_line, use_container_width=True)
+
 
 # ===================== DETAILED REPORTS =====================
 st.markdown("---")
@@ -585,4 +597,5 @@ with export_col2:
 # ===================== FOOTER =====================
 st.markdown("---")
 st.caption("📊 Sales Performance Dashboard | Built with Streamlit")
+
 
