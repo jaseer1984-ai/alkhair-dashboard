@@ -1,7 +1,6 @@
 # app.py — Enhanced Professional Sales Dashboard
 # ==============================================
 # ✨ Modern UI, KPI cards, gauges, alerts, daily/monthly reports
-# 🧪 Run: streamlit run app.py
 
 import pandas as pd
 import streamlit as st
@@ -16,6 +15,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# 🔗 Google Sheet XLSX Published Link (your latest link)
 DATA_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRNRbNPNch0iTMcoZnb0VPl_wIHHnZRtJ8W0U92hoVKoksqbSFlxkB2YW6XyRmWGA/pub?output=xlsx"
 
 # ===================== CUSTOM CSS =====================
@@ -55,30 +55,11 @@ st.markdown("""
         align-items: center;
         gap: 0.75rem;
     }
-    .kpi-left {
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-    }
-    .kpi-title {
-        font-size: 0.9rem;
-        font-weight: 600;
-        color: #555555;
-        margin-bottom: 0.3rem;
-    }
-    .kpi-main {
-        font-size: 1.5rem;
-        font-weight: 700;
-    }
-    .kpi-right {
-        text-align: right;
-        font-size: 0.8rem;
-        color: #777777;
-    }
-    .kpi-highlight {
-        font-weight: 600;
-        color: #1f77b4;
-    }
+    .kpi-left { display: flex; flex-direction: column; justify-content: center; }
+    .kpi-title { font-size: 0.9rem; font-weight: 600; color: #555; margin-bottom: 0.3rem; }
+    .kpi-main { font-size: 1.5rem; font-weight: 700; }
+    .kpi-right { text-align: right; font-size: 0.8rem; color: #777; }
+    .kpi-highlight { font-weight: 600; color: #1f77b4; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -86,19 +67,22 @@ st.markdown("""
 st.markdown('<h1 class="main-header">📊 Sales Performance Dashboard</h1>', unsafe_allow_html=True)
 st.caption("Data source: Google Sheet ➜ published XLSX link")
 
-# ===================== DATA LOADING (from Google Sheet URL) =====================
-@st.cache_data
-def load_data():
-    df = pd.read_excel(DATA_URL)
+# ===================== DATA LOADING (with cache + refresh) =====================
 
-    if "DATE" not in df.columns:
-        raise ValueError("Column 'DATE' not found")
+if "data_version" not in st.session_state:
+    st.session_state["data_version"] = 0  # used only to bust cache when refreshing
+
+@st.cache_data
+def load_data(version: int):
+    """Load & preprocess data from Google Sheet."""
+    # engine="openpyxl" requires openpyxl in requirements.txt
+    df = pd.read_excel(DATA_URL, engine="openpyxl")
+
+    if "DATE" not in df.columns or "BRANCH" not in df.columns:
+        raise ValueError("Input must contain 'DATE' and 'BRANCH' columns")
 
     df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
     df = df.dropna(subset=["DATE"])
-
-    if "BRANCH" not in df.columns:
-        raise ValueError("Column 'BRANCH' not found")
 
     df["BRANCH"] = df["BRANCH"].astype(str).str.strip()
     df["Month"] = df["DATE"].dt.to_period("M").astype(str)
@@ -107,9 +91,14 @@ def load_data():
 
     return df
 
+# ---- Sidebar: Data source controls ----
+st.sidebar.subheader("🔄 Data Source")
+if st.sidebar.button("🔁 Refresh data from Google Sheet"):
+    st.session_state["data_version"] += 1
+
 try:
     with st.spinner("📊 Loading and processing data from Google Sheets..."):
-        df = load_data()
+        df = load_data(st.session_state["data_version"])
 except Exception as e:
     st.error(f"❌ Error loading data: {e}")
     st.stop()
@@ -131,6 +120,15 @@ def format_percent(x):
     if pd.isna(x):
         return "-"
     return f"{x:.1f}%"
+
+def arrow_html(pct_diff: float) -> str:
+    """Green ▲ if above target, red ▼ if below target."""
+    if pd.isna(pct_diff):
+        return ""
+    if pct_diff >= 0:
+        return f'<span style="color:#1a9c5b; font-weight:600;">▲ {pct_diff:.1f}% vs target</span>'
+    else:
+        return f'<span style="color:#e5534b; font-weight:600;">▼ {abs(pct_diff):.1f}% vs target</span>'
 
 def build_kpis(df_):
     cols = df_.columns
@@ -159,24 +157,8 @@ def build_kpis(df_):
         "overall_pct": overall_pct,
     }
 
-# arrow html helper
-def arrow_html(pct_diff: float) -> str:
-    """
-    Returns HTML for green up arrow or red down arrow with % vs target.
-    pct_diff = achievement% - 100
-    """
-    if pd.isna(pct_diff):
-        return ""
-    if pct_diff >= 0:
-        return f'<span style="color:#1a9c5b; font-weight:600;">▲ {pct_diff:.1f}% vs target</span>'
-    else:
-        return f'<span style="color:#e5534b; font-weight:600;">▼ {abs(pct_diff):.1f}% vs target</span>'
-
-# 🔧 Gauge with center text
 def create_gauge_chart(value, target):
-    """
-    Create a donut-style gauge with percentage text in the center.
-    """
+    """Donut gauge with center text."""
     pct = (value / target * 100) if target > 0 else 0
     pct_for_gauge = max(0, min(pct, 100))
 
@@ -215,17 +197,11 @@ def create_gauge_chart(value, target):
         y=alt.value(80),
     )
 
-    chart = (base + text).properties(
-        width=160,
-        height=160,
-    )
-
-    return chart
+    return (base + text).properties(width=160, height=160)
 
 # ===================== SIDEBAR FILTERS =====================
 st.sidebar.header("🔎 Filters & Settings")
 
-# ---- 2 separate date pickers ----
 min_date = df["DATE"].min().date()
 max_date = df["DATE"].max().date()
 
@@ -247,10 +223,8 @@ if start_date > end_date:
     st.sidebar.error("From date cannot be after To date")
     st.stop()
 
-# ---- Branch radio selection ----
 branches_all = sorted(df["BRANCH"].dropna().unique())
 st.sidebar.subheader("🏢 Branch")
-
 branch_choice = st.sidebar.radio(
     "Select branch",
     options=["All Branches"] + branches_all,
@@ -266,7 +240,7 @@ show_alerts = st.sidebar.checkbox("🚨 Show Performance Alerts", value=True)
 show_trends = st.sidebar.checkbox("📈 Show Trend Analysis", value=True)
 
 if st.sidebar.button("🔄 Reset Filters"):
-    st.rerun()
+    st.experimental_rerun()
 
 # ===================== APPLY FILTERS =====================
 mask = (
@@ -285,7 +259,6 @@ if df_filtered.empty:
 st.markdown("### 🎯 Performance Overview")
 
 kpis = build_kpis(df_filtered)
-
 sales_delta_pct = kpis["sales_ach_pct"] - 100
 nob_delta_pct = kpis["nob_ach_pct"] - 100
 
@@ -452,7 +425,7 @@ with perf_col2:
         </div>
         """, unsafe_allow_html=True)
 
-# ===================== TREND ANALYSIS =====================
+# ===================== TREND ANALYSIS (DATE ONLY) =====================
 if show_trends:
     st.markdown("### 📈 Trend Analysis")
 
@@ -462,11 +435,13 @@ if show_trends:
     }).reset_index()
 
     daily_trend["Achievement %"] = (daily_trend["Sales Achieved"] / daily_trend["Sales Target"] * 100).fillna(0)
+    daily_trend["DATE_ONLY"] = daily_trend["DATE"].dt.date
+    daily_trend["DATE_STR"] = daily_trend["DATE"].dt.strftime("%Y-%m-%d")
 
     trend_chart = alt.Chart(daily_trend).mark_line(point=True).encode(
-        x=alt.X("DATE:T", title="Date"),
+        x=alt.X("DATE_ONLY:O", title="Date", axis=alt.Axis(labelAngle=-45)),
         y=alt.Y("Achievement %:Q", title="Sales Achievement %"),
-        tooltip=["DATE:T", "Achievement %:Q", "Sales Achieved:Q", "Sales Target:Q"]
+        tooltip=["DATE_STR:N", "Achievement %:Q", "Sales Achieved:Q", "Sales Target:Q"]
     ).properties(
         height=300,
         title="Daily Sales Achievement Trend"
@@ -582,13 +557,21 @@ st.markdown("### 💾 Export Data")
 export_col1, export_col2 = st.columns([3, 1])
 
 with export_col1:
-    st.info("📊 Download current view as Excel file")
+    st.info("📊 Download current filtered view as Excel file")
 
 with export_col2:
+    # Recalculate branch summary for export
+    branch_summary_export = df_filtered.groupby("BRANCH").agg({
+        "Sales Target": "sum",
+        "Sales Achieved": "sum",
+        "NOB Target": "sum",
+        "NOB Achieved": "sum"
+    }).reset_index()
+
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_filtered.to_excel(writer, sheet_name='Raw Data', index=False)
-        branch_summary.to_excel(writer, sheet_name='Branch Summary', index=False)
+        branch_summary_export.to_excel(writer, sheet_name='Branch Summary', index=False)
 
     output.seek(0)
 
@@ -602,5 +585,3 @@ with export_col2:
 # ===================== FOOTER =====================
 st.markdown("---")
 st.caption("📊 Sales Performance Dashboard | Built with Streamlit")
-
-
